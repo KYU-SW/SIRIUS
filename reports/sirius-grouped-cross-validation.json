@@ -1,0 +1,63 @@
+{
+  "architecture": "sirius_net",
+  "source_manifest_sha256": "d52b0bc2fdb36c74ef67bd133518467f4048ca36fc59aa1a97db5704c29d03d9",
+  "source_audit_sha256": "7204e51d116ded2946eb74821577dd754e7511f8d355b7916ba6ce83438c5cff",
+  "training_settings": {
+    "epochs": 22,
+    "width": 1.5,
+    "seed": 1,
+    "aug": 1.0,
+    "lr": 0.003,
+    "bs": 64,
+    "wd": 0.0005,
+    "drop": 0.2,
+    "smooth": 0.05,
+    "threads": 2
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "best_epoch": 18,
+      "accuracy": 0.9412429378531073,
+      "macro_f1": 0.940776234331261,
+      "checkpoint_sha256": "d696d6f44cfb6bf4e2bc57834259e72949843c8935c81a9726df0de7a3c01b15"
+    },
+    {
+      "fold": 2,
+      "best_epoch": 15,
+      "accuracy": 0.9333333333333333,
+      "macro_f1": 0.9292591024270305,
+      "checkpoint_sha256": "4ec6846bfd4d666e6eab3bec54e30400af079c2c887559885a9793f7e462bb47"
+    },
+    {
+      "fold": 3,
+      "best_epoch": 19,
+      "accuracy": 0.9299435028248587,
+      "macro_f1": 0.9224176091550059,
+      "checkpoint_sha256": "0250567f5bd894cb7b63f4862202d52034da265df8128294ec7eec2f7acf7aac"
+    },
+    {
+      "fold": 4,
+      "best_epoch": 22,
+      "accuracy": 0.9423728813559322,
+      "macro_f1": 0.9402225120718104,
+      "checkpoint_sha256": "3e7c9d5a41eb8988b339e9238f2a146fd8c7af817f1b55812418d483456f9762"
+    },
+    {
+      "fold": 5,
+      "best_epoch": 21,
+      "accuracy": 0.9322033898305084,
+      "macro_f1": 0.9300906015809899,
+      "checkpoint_sha256": "0d3d64ab4b71864ce0f6c8cc550407cdc8d5c71db53caccd7c75321e3ba8632a"
+    }
+  ],
+  "test_images_used": false,
+  "limitations": [
+    "Internal model selection using each fold for epoch selection.",
+    "The source benchmark was inspected in earlier experiments.",
+    "This does not establish patient-level or external independence."
+  ],
+  "mean_macro_f1": 0.9325532119132196,
+  "std_macro_f1": 0.007015444573765612,
+  "mean_accuracy": 0.9358192090395481
+}

@@ -1,0 +1,70 @@
+{
+  "source": "https://figshare.com/articles/dataset/brain_tumor_dataset/1512427",
+  "source_version": 8,
+  "archive_files_sha256": {
+    "brainTumorDataPublic_1-766.zip": "cdac0a7f4152cb34dd79b13543da96c37a6928ad8cb823e2662150b1a73ade54",
+    "brainTumorDataPublic_1533-2298.zip": "612d9f506c55c54db5f2f38b6d50741ef97a6d7c32b3e1be76e789674a97aefb",
+    "brainTumorDataPublic_767-1532.zip": "d18e896d14f7af791cdd3d9b9342f9f974742a06132effde5a5219209862b4ce",
+    "brainTumorDataPublic_2299-3064.zip": "9a673c55d139133cfbc57097bf155b5ac9f33684ee97f40bf2afba332d416a3a",
+    "cvind.mat": "b4310122ee77e08cab74332c11d77ee4c34754fbcd9d5376cbbb88f7debbd5e8",
+    "README 2024.txt": "1fcb55d9dbc5c9b4d650e53fa8e606af356f0eefd3df32c04a2aaff1d237aa95"
+  },
+  "images": 3064,
+  "patient_groups": 233,
+  "source_label_counts": {
+    "1": 708,
+    "2": 1426,
+    "3": 930
+  },
+  "source_label_mapping": {
+    "1": "meningioma",
+    "2": "glioma",
+    "3": "pituitary"
+  },
+  "official_folds_patients_in_multiple_folds": 0,
+  "patients_with_multiple_labels": 0,
+  "pixel_duplicates_crossing_patient_ids": 0,
+  "generated_patient_grouped_folds": [
+    {
+      "fold": 1,
+      "fit_images": 2451,
+      "validation_images": 613,
+      "fit_groups": 187,
+      "validation_groups": 46
+    },
+    {
+      "fold": 2,
+      "fit_images": 2451,
+      "validation_images": 613,
+      "fit_groups": 186,
+      "validation_groups": 47
+    },
+    {
+      "fold": 3,
+      "fit_images": 2452,
+      "validation_images": 612,
+      "fit_groups": 187,
+      "validation_groups": 46
+    },
+    {
+      "fold": 4,
+      "fit_images": 2451,
+      "validation_images": 613,
+      "fit_groups": 187,
+      "validation_groups": 46
+    },
+    {
+      "fold": 5,
+      "fit_images": 2451,
+      "validation_images": 613,
+      "fit_groups": 185,
+      "validation_groups": 48
+    }
+  ],
+  "predictions_or_training_performed": false,
+  "limitations": [
+    "No normal class: this is not a four-class evaluation cohort.",
+    "The Figshare source overlaps earlier Kaggle development sources; not a new external cohort.",
+    "Opaque patient group IDs and slice-level records stay local."
+  ]
+}

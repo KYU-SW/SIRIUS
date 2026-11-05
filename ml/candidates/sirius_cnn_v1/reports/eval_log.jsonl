@@ -1,0 +1,6 @@
+{"time": "2026-10-29 23:00:31", "name": "cnn_w10", "split": "val", "model_sha256": "3f9415b5d25f361aac333940ab8745a098a9a7790f8b727f9a714bd34d0331e2", "acc_all": 0.989, "acc_clean": 0.9833}
+{"time": "2026-10-29 23:00:38", "name": "RF_baseline", "split": "val", "model_sha256": "ccba383c9d3c74b9fcb027a8b88783b0664c67042ba2b8fde1ff121394426956", "acc_all": 0.769, "acc_clean": 0.7714}
+{"time": "2026-10-29 23:43:52", "name": "cnn_w15", "split": "val", "model_sha256": "5351c6d7fd1c75571f46d4096ebb8a98f50f86d4c18a3b72d715947b702d6a5d", "acc_all": 0.993, "acc_clean": 0.9888}
+{"time": "2026-10-29 23:44:05", "name": "cnn_w15", "split": "test", "model_sha256": "5351c6d7fd1c75571f46d4096ebb8a98f50f86d4c18a3b72d715947b702d6a5d", "acc_all": 0.992, "acc_clean": 0.9911}
+{"time": "2026-10-29 23:44:12", "name": "RF_baseline", "split": "test", "model_sha256": "ccba383c9d3c74b9fcb027a8b88783b0664c67042ba2b8fde1ff121394426956", "acc_all": 0.727, "acc_clean": 0.726}
+{"time": "2026-10-29 23:44:16", "name": "cnn_w10_notselected", "split": "test", "model_sha256": "3f9415b5d25f361aac333940ab8745a098a9a7790f8b727f9a714bd34d0331e2", "acc_all": 0.99, "acc_clean": 0.9858}

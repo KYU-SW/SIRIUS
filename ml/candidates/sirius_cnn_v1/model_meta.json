@@ -1,0 +1,32 @@
+{
+  "name": "SiriusNet w1.5 candidate (demonstration only)",
+  "format": "onnx",
+  "classes": [
+    "glioma_tumor",
+    "meningioma_tumor",
+    "pituitary_tumor",
+    "no_tumor"
+  ],
+  "input": "gray float32 [B,1,128,128] in [0,1]",
+  "outputs": [
+    "probs[B,4]",
+    "cam[B,4,16,16]"
+  ],
+  "sha256": "5351c6d7fd1c75571f46d4096ebb8a98f50f86d4c18a3b72d715947b702d6a5d",
+  "temperature": 0.4097,
+  "val_nll_before_after_calibration": [
+    0.0731,
+    0.0284
+  ],
+  "best_epoch": 18,
+  "validation_macro_f1": 0.9916,
+  "params": 1098316,
+  "trained_on": "user-supplied archive.zip (MRI Dataset; origin unverified)",
+  "trained_at": "2026-10-29T14:43:46.040824+00:00",
+  "onnx_parity_max_abs_diff": {
+    "probs": 2.1653249859809875e-08,
+    "cam": 2.86102294921875e-05
+  },
+  "clinical_validation": false,
+  "test_status": "see eval_*.json; patient-level independence not established"
+}

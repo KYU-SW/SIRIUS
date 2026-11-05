@@ -1,0 +1,36 @@
+{
+  "artifacts": [
+    {
+      "path": "ml/backbone.pth",
+      "bytes": 21447901,
+      "sha256": "29483d25900e6e0894d8f2fb8ad30158f5b957cdae3ee7fa6ea1d7fca4c107f9"
+    },
+    {
+      "path": "ml/classifier.joblib",
+      "bytes": 49626,
+      "sha256": "bbb7e7d7624fd24d0ea1352d48207a14c1e04097d30e09cb1117feaa409b5952"
+    },
+    {
+      "path": "ml/model_rf.joblib",
+      "bytes": 23666606,
+      "sha256": "3df46428c4e964d6780215d4471b0e4a0b94a88f5c3efa78a2eecab14a1efa7d"
+    },
+    {
+      "path": "ml/candidates/sirius_cnn_v1/model.onnx",
+      "bytes": 4394725,
+      "sha256": "5351c6d7fd1c75571f46d4096ebb8a98f50f86d4c18a3b72d715947b702d6a5d"
+    }
+  ],
+  "active": [
+    "ml/backbone.pth",
+    "ml/classifier.joblib"
+  ],
+  "legacy_baseline": [
+    "ml/model_rf.joblib"
+  ],
+  "historical_candidate": [
+    "ml/candidates/sirius_cnn_v1/model.onnx"
+  ],
+  "contains_training_images": false,
+  "clinical_validation": false
+}

@@ -1,0 +1,160 @@
+{
+ "name": "cnn_w10",
+ "split": "val",
+ "model_file": "model.onnx",
+ "model_sha256": "3f9415b5d25f361aac333940ab8745a098a9a7790f8b727f9a714bd34d0331e2",
+ "all": {
+  "n": 1000,
+  "accuracy": 0.989,
+  "accuracy_ci95": [
+   0.9804,
+   0.9938
+  ],
+  "macro_f1": 0.989,
+  "macro_f1_ci95": [
+   0.9819,
+   0.995
+  ],
+  "nll": 0.0311,
+  "ece": 0.0045,
+  "per_class": [
+   {
+    "class": "glioma_tumor",
+    "precision": 1.0,
+    "recall": 0.976,
+    "f1": 0.9879,
+    "support": 250
+   },
+   {
+    "class": "meningioma_tumor",
+    "precision": 0.9881,
+    "recall": 0.996,
+    "f1": 0.992,
+    "support": 250
+   },
+   {
+    "class": "pituitary_tumor",
+    "precision": 0.9727,
+    "recall": 0.996,
+    "f1": 0.9842,
+    "support": 250
+   },
+   {
+    "class": "no_tumor",
+    "precision": 0.996,
+    "recall": 0.988,
+    "f1": 0.992,
+    "support": 250
+   }
+  ],
+  "confusion_matrix(rows=true, cols=pred)": [
+   [
+    244,
+    2,
+    4,
+    0
+   ],
+   [
+    0,
+    249,
+    1,
+    0
+   ],
+   [
+    0,
+    0,
+    249,
+    1
+   ],
+   [
+    0,
+    1,
+    2,
+    247
+   ]
+  ],
+  "class_order": [
+   "glioma_tumor",
+   "meningioma_tumor",
+   "pituitary_tumor",
+   "no_tumor"
+  ]
+ },
+ "clean": {
+  "n": 538,
+  "accuracy": 0.9833,
+  "accuracy_ci95": [
+   0.9685,
+   0.9912
+  ],
+  "macro_f1": 0.9831,
+  "macro_f1_ci95": [
+   0.9713,
+   0.9935
+  ],
+  "nll": 0.0355,
+  "ece": 0.0107,
+  "per_class": [
+   {
+    "class": "glioma_tumor",
+    "precision": 1.0,
+    "recall": 0.9716,
+    "f1": 0.9856,
+    "support": 211
+   },
+   {
+    "class": "meningioma_tumor",
+    "precision": 0.9783,
+    "recall": 0.9926,
+    "f1": 0.9854,
+    "support": 136
+   },
+   {
+    "class": "pituitary_tumor",
+    "precision": 0.9528,
+    "recall": 1.0,
+    "f1": 0.9758,
+    "support": 121
+   },
+   {
+    "class": "no_tumor",
+    "precision": 1.0,
+    "recall": 0.9714,
+    "f1": 0.9855,
+    "support": 70
+   }
+  ],
+  "confusion_matrix(rows=true, cols=pred)": [
+   [
+    205,
+    2,
+    4,
+    0
+   ],
+   [
+    0,
+    135,
+    1,
+    0
+   ],
+   [
+    0,
+    0,
+    121,
+    0
+   ],
+   [
+    0,
+    1,
+    1,
+    68
+   ]
+  ],
+  "class_order": [
+   "glioma_tumor",
+   "meningioma_tumor",
+   "pituitary_tumor",
+   "no_tumor"
+  ]
+ }
+}

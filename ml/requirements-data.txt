@@ -1,0 +1,3 @@
+# Optional original MAT/HDF5 dataset audit; not needed by the inference app.
+-r requirements.txt
+h5py==3.16.0

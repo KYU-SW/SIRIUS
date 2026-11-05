@@ -1,0 +1,160 @@
+{
+ "name": "RF_baseline",
+ "split": "test",
+ "model_file": "model_rf.joblib",
+ "model_sha256": "ccba383c9d3c74b9fcb027a8b88783b0664c67042ba2b8fde1ff121394426956",
+ "all": {
+  "n": 1000,
+  "accuracy": 0.727,
+  "accuracy_ci95": [
+   0.6986,
+   0.7537
+  ],
+  "macro_f1": 0.7187,
+  "macro_f1_ci95": [
+   0.6884,
+   0.7474
+  ],
+  "nll": 0.8063,
+  "ece": 0.2019,
+  "per_class": [
+   {
+    "class": "glioma_tumor",
+    "precision": 0.7143,
+    "recall": 0.74,
+    "f1": 0.7269,
+    "support": 250
+   },
+   {
+    "class": "meningioma_tumor",
+    "precision": 0.65,
+    "recall": 0.468,
+    "f1": 0.5442,
+    "support": 250
+   },
+   {
+    "class": "pituitary_tumor",
+    "precision": 0.72,
+    "recall": 0.864,
+    "f1": 0.7855,
+    "support": 250
+   },
+   {
+    "class": "no_tumor",
+    "precision": 0.8008,
+    "recall": 0.836,
+    "f1": 0.818,
+    "support": 250
+   }
+  ],
+  "confusion_matrix(rows=true, cols=pred)": [
+   [
+    185,
+    35,
+    30,
+    0
+   ],
+   [
+    58,
+    117,
+    30,
+    45
+   ],
+   [
+    11,
+    16,
+    216,
+    7
+   ],
+   [
+    5,
+    12,
+    24,
+    209
+   ]
+  ],
+  "class_order": [
+   "glioma_tumor",
+   "meningioma_tumor",
+   "pituitary_tumor",
+   "no_tumor"
+  ]
+ },
+ "clean": {
+  "n": 562,
+  "accuracy": 0.726,
+  "accuracy_ci95": [
+   0.6877,
+   0.7612
+  ],
+  "macro_f1": 0.7303,
+  "macro_f1_ci95": [
+   0.6923,
+   0.7662
+  ],
+  "nll": 0.8349,
+  "ece": 0.2116,
+  "per_class": [
+   {
+    "class": "glioma_tumor",
+    "precision": 0.7727,
+    "recall": 0.7356,
+    "f1": 0.7537,
+    "support": 208
+   },
+   {
+    "class": "meningioma_tumor",
+    "precision": 0.6423,
+    "recall": 0.5411,
+    "f1": 0.5874,
+    "support": 146
+   },
+   {
+    "class": "pituitary_tumor",
+    "precision": 0.7101,
+    "recall": 0.8511,
+    "f1": 0.7742,
+    "support": 141
+   },
+   {
+    "class": "no_tumor",
+    "precision": 0.7778,
+    "recall": 0.8358,
+    "f1": 0.8058,
+    "support": 67
+   }
+  ],
+  "confusion_matrix(rows=true, cols=pred)": [
+   [
+    153,
+    31,
+    24,
+    0
+   ],
+   [
+    36,
+    79,
+    17,
+    14
+   ],
+   [
+    9,
+    10,
+    120,
+    2
+   ],
+   [
+    0,
+    3,
+    8,
+    56
+   ]
+  ],
+  "class_order": [
+   "glioma_tumor",
+   "meningioma_tumor",
+   "pituitary_tumor",
+   "no_tumor"
+  ]
+ }
+}

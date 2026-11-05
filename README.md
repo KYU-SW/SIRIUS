@@ -9,7 +9,7 @@ MRI 이미지와 분석 결과를 쉬운 한국어로 살펴보는 로컬 웹 �
 Node.js 18 이상을 설치한 뒤 실행합니다.
 
 ```sh
-git clone https://github.com/knu3146/SIRIUS.git
+git clone https://github.com/KYU-SW/SIRIUS.git
 cd SIRIUS
 npm ci
 npm start
@@ -29,7 +29,7 @@ npm start
 | `js/report.js`, `js/render.js`, `js/glossary.js` | 설명, 결과 표시와 용어 사전 |
 | `js/config.js`, `js/state.js`, `js/shell.js`, `js/app.js` | 설정·상태·화면 전환·앱 진입 |
 | `server.js`, `api/` | 로컬 웹 서버, 메일 인증, 아이디 등록 API |
-| `ml/` | HOG + 랜덤포레스트 분석 서버와 재학습 코드 |
+| `ml/` | EfficientNet 특징 기반 분석 서버, 비교 모델과 재학습 코드 |
 | `train/` | 별도 Colab/TensorFlow 학습 노트북과 연결 예제 |
 | `scripts/check.mjs`, `test/` | 문법·참조 경로 검사 및 서버 회귀 검증 |
 
@@ -37,7 +37,7 @@ npm start
 
 ## 메일 인증 설정
 
-서버를 처음 실행하면 `.env.local`과 인증 암호화 키가 자동 생성됩니다. 직접 준비하려면 `.env.example`을 `.env.local`로 복사하세요.
+기본 개인정보 보호 모드에서는 계정·메일 인증과 환경 파일 자동 생성을 사용하지 않습니다. 메일 인증을 명시적으로 활성화한 경우에만 `.env.local`과 인증 암호화 키가 생성됩니다. 직접 준비하려면 `.env.example`을 `.env.local`로 복사하세요.
 
 Gmail 사용 시 아래 항목을 채웁니다. `GMAIL_APP_PASSWORD`는 Google 계정의 앱 비밀번호입니다.
 
@@ -155,6 +155,18 @@ python ml/audit_candidate.py --dataset datasets/new-candidate --references datas
 
 ## 자동 검사
 
-GitHub의 [Code checks](https://github.com/knu3146/SIRIUS/actions) 워크플로는 push와 pull request에서 JavaScript 문법·회귀 테스트 및 Python 테스트를 실행합니다. 실제 MRI 데이터나 학습된 가중치는 CI에 올리지 않으며, 모델의 임상 성능을 검증하는 검사도 아닙니다.
+GitHub의 [Code checks](https://github.com/KYU-SW/SIRIUS/actions) 워크플로는 push와 pull request에서 JavaScript 문법·회귀 테스트 및 Python 테스트를 실행합니다. 실제 MRI 데이터를 사용하지 않으며, 모델의 임상 성능을 검증하는 검사도 아닙니다.
 
 Windows 실행 스크립트는 프로젝트 `.venv`를 우선 사용합니다. `start.bat`은 로컬에 준비된 `.runtime/node/node.exe`가 있으면 사용하고, 없으면 설치된 Node.js를 찾습니다. 이 로컬 실행 파일 역시 Git에서 제외합니다.
+
+## 공유 산출물
+- 실행 모델: `ml/backbone.pth`, `ml/classifier.joblib`. 파일 무결성은 [모델 해시 목록](reports/model-artifacts.json)을 참고하세요.
+- 과거 RF 기준선과 Sirius ONNX 후보도 보존했습니다. 후보 ONNX는 현재 서버의 기본 모델이 아닙니다. [과거 후보 결과와 한계](ml/candidates/sirius_cnn_v1/README_KO.md)를 확인하세요.
+- [3분 발표 Word](deliverables/NEURIA/NEURIA_3minute_presentation_20261030.docx), [PDF](deliverables/NEURIA/NEURIA_3minute_presentation_20261030.pdf): 2026-10-30 기준 스냅샷입니다.
+- [원본 Figshare 환자 그룹 감사](reports/figshare-patient-audit.json): 3,064장·233개 환자 그룹, 공식 5분할 간 환자 중복 0건. 정상 클래스가 없고 기존 개발 데이터와 출처가 겹치므로 새로운 독립 4클래스 평가가 아닙니다.
+
+원본 MAT 감사는 `pip install -r ml/requirements-data.txt` 후 `python ml/audit_patient_groups.py --source datasets/figshare-original --output datasets/figshare-original/patient-audit.json --summary reports/figshare-patient-audit.json`으로 실행합니다. 원본 파일과 Figshare API 메타데이터 `source.json`이 필요합니다. 환자 그룹별 상세 목록은 공개하지 않습니다.
+
+원본 MRI, 이미지별 목록·예측 배열, 비밀 설정, 실행 환경, 중간 체크포인트와 문서 검수 이미지는 공개 저장소에서 제외합니다.
+
+추가 Sirius 5분할 비교가 완료됐으며 평균 macro-F1은 0.93255입니다. [최종 집계](reports/sirius-grouped-cross-validation.json)를 공개합니다. 이는 내부 에폭 선택용 비교이며, 활성 EfficientNet 모델을 자동 교체하지 않았습니다.

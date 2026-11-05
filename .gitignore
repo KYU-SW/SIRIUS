@@ -27,3 +27,11 @@ kaggle.json
 *.npz
 ml/experiments/
 .runtime/
+
+# Share deployable model artifacts; keep datasets and experiment checkpoints local.
+!ml/backbone.pth
+!ml/classifier.joblib
+!ml/model_rf.joblib
+!ml/candidates/sirius_cnn_v1/model.onnx
+ml/candidates/sirius_cnn_v1/reports/leak_manifest.json
+deliverables/**/render/
