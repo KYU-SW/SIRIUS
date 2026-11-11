@@ -32,6 +32,18 @@ test('내장 객체 이름이 등록된 계정으로 오인되지 않는다', ()
   assert.equal(accounts.byId('__proto__'), null);
 });
 
+test('기기 전용 계정은 전달된 이메일도 저장하지 않고 비밀번호로만 복호화한다', async () => {
+  const {data, context} = storage();
+  context.CONFIG = {privacy:false, auth:'local'};
+  const {acc} = await context.createAccount({id:'local_user', email:'do-not-store@example.invalid', pw:'Synthetic-Test!123'});
+  assert.equal(acc.emailHash, '');
+  assert.equal(acc.emailMask, '');
+  const unlocked = await context.unlockWithPw(acc, 'Synthetic-Test!123');
+  assert.equal((await context.unseal(unlocked.key, acc.data)).email, '');
+  assert.ok(!data.get('mri-accounts-v3').includes('do-not-store'));
+  await assert.rejects(context.unlockWithPw(acc, 'incorrect'));
+});
+
 test('특수한 이름도 일반 계정처럼 저장·조회·삭제한다', () => {
   const { accounts } = storage();
   for (const id of ['constructor', '__proto__', 'normal_user']) {
@@ -67,4 +79,28 @@ test('암호화 계정은 비밀번호·복구 키로 열리고 재발급 후 �
   const nextRecovery = await context.rewrapRecovery(acc, unlocked.raw);
   await assert.rejects(context.unlockWithRec(acc, rec));
   assert.equal((await context.unseal((await context.unlockWithRec(acc, nextRecovery)).key, acc.data)).scans.length, 1);
+});
+
+test('이전 반복 횟수의 계정도 비밀번호·복구 키를 따로 갱신하며 기존 기록을 유지한다', async () => {
+  const {context}=storage();
+  const oldIter=100000, pw='Legacy-Test!123', rec='MRI-SYNTH-ETIC-RECOVERY';
+  const master=webcrypto.getRandomValues(new Uint8Array(32));
+  const pwSalt=webcrypto.getRandomValues(new Uint8Array(16)), recSalt=webcrypto.getRandomValues(new Uint8Array(16));
+  const encoded=x=>btoa(String.fromCharCode(...x));
+  const acc={id:'legacy_user',iter:oldIter,pwSalt:encoded(pwSalt),recSalt:encoded(recSalt),
+    wrapPw:await context.seal(await context.kdf(pw,pwSalt,oldIter),{m:encoded(master)}),
+    wrapRec:await context.seal(await context.kdf(rec.replace(/[^A-Z0-9]/g,''),recSalt,oldIter),{m:encoded(master)})};
+  acc.data=await context.seal(await vm.runInContext('importMaster',context)(master),{marker:'synthetic-preserved-record'});
+  const original=await context.unlockWithPw(acc,pw);
+  await context.rewrapPassword(acc,original.raw,'Updated-Test!456');
+  assert.equal(acc.pwIter,600000);assert.equal(acc.recIter,oldIter);
+  await context.unlockWithRec(acc,rec);
+  await assert.rejects(context.unlockWithPw(acc,pw));
+  await context.unlockWithPw(acc,'Updated-Test!456');
+  const replacement=await context.rewrapRecovery(acc,original.raw);
+  assert.equal(acc.recIter,600000);
+  const recovered=await context.unlockWithRec(acc,replacement);
+  assert.equal((await context.unseal(recovered.key,acc.data)).marker,'synthetic-preserved-record');
+  await context.unlockWithPw(acc,'Updated-Test!456');
+  await assert.rejects(context.unlockWithRec(acc,rec));
 });

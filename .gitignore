@@ -35,3 +35,6 @@ ml/experiments/
 !ml/candidates/sirius_cnn_v1/model.onnx
 ml/candidates/sirius_cnn_v1/reports/leak_manifest.json
 deliverables/**/render/
+
+# Private user-supplied planning references and standing instructions.
+claude/

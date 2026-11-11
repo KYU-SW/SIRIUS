@@ -53,59 +53,42 @@ if($('cvdSet')) $('cvdSet').addEventListener('click', e => {
 
 /* ── 랜딩 ↔ 인증 ↔ 앱 ───────────────────────────────────── */
 function showLanding(){
+  if((S.acc || S.masterKey) && typeof logout === 'function') logout();
+  if(typeof clearPending === 'function') clearPending();
+  if(typeof clearAuthSecrets === 'function') clearAuthSecrets();
   $('landing').hidden = false; $('gate').hidden = true; $('app').hidden = true;
   window.scrollTo({top:0});
 }
 function showAuth(){ $('landing').hidden = true; }   // show() 가 gate 를 띄웁니다
 
-$('toLoginTop').onclick  = () => { if(CONFIG.privacy) return enterGuest('analyze'); showAuth(); show('login'); };
+$('toLoginTop').onclick  = () => { showAuth(); show('login'); };
 $('toSignupTop').onclick = () => { showAuth(); $('goSignup').click(); };
 $('authHome').onclick    = showLanding;
 
-/* 가입 없이 둘러보는 진입점 */
-function enterGuest(page){
-  if(S.acc || S.img) logout();
-  S.guest = true; S.scans = [];
-  $('landing').hidden = true;
-  enterApp();
-  if(page) go(page);
-}
-$('heroStart').onclick = () => { if(CONFIG.privacy) return enterGuest('analyze'); showAuth(); show('login'); };
+/* 익명 진입은 없습니다. 모든 시작 버튼은 로그인 화면으로 갑니다. */
+$('heroStart').onclick = () => { showAuth(); show('login'); };
 document.querySelectorAll('[data-landing]').forEach(b => b.onclick = () => {
   const to = b.dataset.landing;
   if(to === 'about'){
     if($('landing').hidden) showLanding();
     setTimeout(() => $('about').scrollIntoView({behavior:'smooth', block:'start'}), 30);
   } else {
-    enterGuest(to);                       // 가이드 / FAQ 는 로그인 없이 볼 수 있습니다
+    showAuth(); show('login');            // 가이드·FAQ·시야 기록도 로그인한 뒤에 볼 수 있습니다
   }
 });
 
 /* ── 사이드바 라우터 ─────────────────────────────────────── */
 const PAGE_TITLE = {
-  analyze:'MRI 분석하기', result:'분석 결과', history:'분석 기록',
-  guide:'사용 가이드', faq:'자주 묻는 질문', mypage:'마이페이지'
+  followup:'경과 관찰', analyze:'영상 보기', result:'분석 결과', history:'분석 기록',
+  field:'시야 기록', guide:'사용 가이드', faq:'자주 묻는 질문', mypage:'마이페이지'
 };
-/* 로그인 없이 볼 수 있는 페이지 — 도움말뿐입니다 */
-const GUEST_OK = {guide:true, faq:true, analyze:true, result:true};
-/* '분석하기' + 는 / '분석 결과' + 은 — 받침에 맞는 조사를 고릅니다 */
-function josa(word, withJong, noJong){
-  const c = String(word).trim().slice(-1).charCodeAt(0);
-  if(c < 0xAC00 || c > 0xD7A3) return noJong;          // 한글이 아니면 받침 없음으로
-  return (c - 0xAC00) % 28 ? withJong : noJong;
-}
-function requireLogin(page){
-  if(CONFIG.privacy) { $('secMode').textContent = '개인정보 보호 모드에서는 계정과 기록을 저장하지 않습니다.'; return; }
-  show('login');
-  const nm = PAGE_TITLE[page];
-  const el = $('ok-login');
-  el.textContent = nm ? `${nm}${josa(nm,'은','는')} 로그인한 뒤에 쓸 수 있습니다.`
-                      : '이 기능은 로그인한 뒤에 쓸 수 있습니다.';
-  el.hidden = false;
-}
+/* 로그인(계정 + 암호화 열쇠) 없이는 어떤 화면도 열리지 않습니다 */
 function go(page){
-  if(!PAGE_TITLE[page]) page = 'analyze';
-  if(S.guest && !GUEST_OK[page]){ requireLogin(page); return; }
+  if(!S.acc || !S.masterKey){ showAuth(); show('login'); return; }
+  if(!PAGE_TITLE[page]) page = 'followup';
+  if(page !== 'followup' && typeof followupLeave === 'function' && followupLeave() === false) return;
+  if(page !== 'field' && typeof vfLeave === 'function') vfLeave();
+  if(page !== 'followup' && typeof fuCancelTest === 'function') fuCancelTest();   // 검사 중 다른 화면으로 가면 검사를 중단
   document.querySelectorAll('[data-page]').forEach(el => { el.hidden = el.dataset.page !== page; });
   document.querySelectorAll('.navitem').forEach(b => {
     if(b.dataset.go === page) b.setAttribute('aria-current', 'page');
@@ -113,6 +96,8 @@ function go(page){
   });
   $('pageTitle').textContent = PAGE_TITLE[page];
   if(page === 'mypage' && typeof renderAccount === 'function') renderAccount();
+  if(page === 'field' && typeof vfEnter === 'function') vfEnter();
+  if(page === 'followup' && typeof fuRender === 'function') fuRender();
   window.scrollTo({top:0});
 }
 document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));

@@ -8,23 +8,18 @@ const EMPTY_ANALYSIS_VIEW = new Map([
    L. 앱 진입 · 잠금
    ═══════════════════════════════════════════════════════════ */
 function enterApp(){
+  if(!S.acc || !S.masterKey){ if(typeof showAuth === 'function') showAuth(); show('login'); return; }   // 로그인하지 않으면 앱 화면을 열지 않음
   $('landing').hidden = true; $('gate').hidden = true; $('app').hidden = false;
-  const label = S.guest ? '둘러보기 모드' : `<b>${esc(S.name || S.acc.id)}</b>님`;
-  $('who').innerHTML = label;
-  $('acctBtn').hidden = S.guest;
+  $('who').innerHTML = `<b>${esc(S.name || S.acc.id)}</b>님`;
+  $('acctBtn').hidden = false;
   if(typeof renderAccount === 'function') renderAccount();
-  document.querySelectorAll('.navitem').forEach(b => {
-    const locked = S.guest && !GUEST_OK[b.dataset.go];
-    b.classList.toggle('locked', locked);
-    b.title = locked ? '로그인한 뒤에 쓸 수 있습니다' : '';
-  });
-  if(typeof go === 'function') go(S.img ? 'result' : 'analyze');
-  $('lockBtn').textContent = S.guest ? '나가기' : '로그아웃';
-  $('secMode').textContent = S.guest
-    ? '지금은 둘러보기 모드라 아무것도 저장되지 않습니다.'
-    : '로그아웃하면 이 기기에서도 내용을 읽을 수 없습니다.';
-  $('tlHint').textContent = S.guest ? '둘러보기 모드 — 저장 기능 꺼짐' : '암호화되어 이 기기에만 저장됩니다 · 최대 8회';
-  $('saveScan').disabled = S.guest || !S.analysis || !S.src;
+  document.querySelectorAll('.navitem').forEach(b => { b.classList.remove('locked'); b.title = ''; });
+  if(typeof followupEnter === 'function') followupEnter();   // S.followup 정제 + 경과 관찰 화면 준비
+  if(typeof go === 'function') go('followup');                // 로그인 뒤 홈은 경과 관찰
+  $('lockBtn').textContent = '로그아웃';
+  $('secMode').textContent = '로그아웃하면 이 기기에서도 내용을 읽을 수 없습니다.';
+  $('tlHint').textContent = '암호화되어 이 기기에만 저장됩니다 · 최대 8회';
+  $('saveScan').disabled = !S.analysis || !S.src;
   renderTimeline();
   resetIdle();
 }
@@ -35,9 +30,12 @@ function logout(){
   if(S.src && typeof S.src.getContext === 'function'){ S.src.width = 0; S.src.height = 0; }
   if(S.img && typeof S.img.removeAttribute === 'function') S.img.removeAttribute('src');
   S.acc = null; S.masterRaw = null; S.masterKey = null; S.email = ''; S.name = '';
-  S.scans = []; S.img = null; S.src = null; S.analysis = null; S.regions = []; S.guest = false;
-  flow.purpose = null; flow.id = ''; flow.email = ''; flow.pw = ''; flow.acc = null;
+  S.scans = []; S.img = null; S.src = null; S.analysis = null; S.regions = []; S.guest = false; S.followup = null;
+  flow.purpose = null; flow.id = ''; flow.email = ''; flow.pw = ''; flow.acc = null; flow.recoveryReturn = false;
+  if(typeof followupReset === 'function') followupReset();   // 경과 관찰 기록·검사 중 화면·타이머·저장 결과 콜백을 모두 정리
+  if(typeof vfReset === 'function') vfReset();   // 시야 기록·검사 중인 화면·파일 비밀번호 입력값을 모두 지움
   if(typeof clearPending === 'function') clearPending();
+  if(typeof clearAuthSecrets === 'function') clearAuthSecrets();
   if(typeof DemoMail !== 'undefined') DemoMail.boxes = Object.create(null);
   if(typeof AuthBackend !== 'undefined'){ AuthBackend.tokens = {}; delete AuthBackend.regToken; }
   for(const id of ['loginId','loginPw','suName','suId','suEmail','suPw','suPw2','lgCode','suCode','fiCode','fpCode','recKey','fileIn']){
@@ -59,7 +57,7 @@ function logout(){
 let idleTimer = null;
 function resetIdle(){
   clearTimeout(idleTimer);
-  if($('app').hidden) return;
+  if($('app').hidden && !(S.acc && S.masterKey)) return;
   idleTimer = setTimeout(logout, 10*60*1000);
 }
 ['pointerdown','keydown','wheel','touchstart'].forEach(ev => window.addEventListener(ev, resetIdle, {passive:true}));
@@ -67,11 +65,11 @@ function resetIdle(){
 $('lockBtn').onclick = logout;
 /* 계정 정보 표 */
 function renderAccount(){
-  if(S.guest || !S.acc){ $('acctState').innerHTML = '<dt>상태</dt><dd>둘러보기 모드 — 저장되지 않습니다</dd>'; return; }
+  if(!S.acc){ $('acctState').innerHTML = ''; return; }
   $('acctState').innerHTML =
-      `<dt>이름</dt><dd>${esc(S.name || '—')}</dd>`
+      `<dt>표시할 별명</dt><dd>${esc(S.name || '—')}</dd>`
     + `<dt>아이디</dt><dd class="mono">${esc(S.acc.id)}</dd>`
-    + `<dt>이메일</dt><dd class="mono">${esc(S.acc.emailMask)}</dd>`
+    + (CONFIG.auth === 'local' ? '' : `<dt>이메일</dt><dd class="mono">${esc(S.acc.emailMask)}</dd>`)
     + `<dt>가입일</dt><dd>${new Date(S.acc.created).toLocaleDateString('ko-KR')}</dd>`
     + `<dt>저장된 회차</dt><dd>${S.scans.length}회</dd>`;
 }
@@ -79,27 +77,37 @@ $('chPwBtn').onclick = () => show('chpw');
 $('newRecBtn').onclick = async () => {
   if(!S.acc || !S.masterRaw) return;
   if(!confirm('복구 키를 새로 발급하면 이전 복구 키는 쓸 수 없게 됩니다. 계속할까요?')) return;
-  // (아래에서 복구 키 화면을 띄웁니다)
-  const rec = await rewrapRecovery(S.acc, S.masterRaw);
-  accounts.put(S.acc);
-  flow.id = S.acc.id;
-  $('recKey').textContent = rec; $('recSaved').checked = false;
-  show('recovery');
-  $('btnRecDone').textContent = '앱으로 돌아가기';
-  $('btnRecDone').onclick = () => {
-    if(!$('recSaved').checked) return alert('복구 키를 보관했는지 확인해 주세요.');
-    $('recKey').textContent = '';
-    $('gate').hidden = true; $('app').hidden = false;
-  };
+  const original = S.acc, key = S.masterKey, expected = JSON.stringify(original), updated = {...original};
+  try{
+    const rec = await rewrapRecovery(updated, S.masterRaw);
+    const result = await accounts.commit(updated, expected, () => S.acc === original && S.masterKey === key);
+    if(result.cancelled) return;
+    if(!result.ok) return alert('복구 키를 저장하지 못했습니다. 다른 탭의 변경이나 저장 공간을 확인해 주세요. 이전 키는 유지됩니다.');
+    S.acc = updated; flow.id = updated.id; flow.recoveryReturn = true;
+    $('recKey').textContent = rec; $('recSaved').checked = false;
+    show('recovery');
+    $('btnRecDone').textContent = '앱으로 돌아가기';
+  }catch(e){ alert('복구 키를 변경하지 못했습니다. 이전 키는 유지됩니다.'); }
 };
-$('delAcct').onclick = () => {
+$('delAcct').onclick = async () => {
   if(!S.acc) return;
-  if(!confirm('계정과 저장된 모든 회차 기록을 이 기기에서 완전히 지웁니다.\n되돌릴 수 없습니다. 계속할까요?')) return;
-  accounts.remove(S.acc.id);
-  ls.del(LKEY);
-  alert('삭제했습니다.');
-  logout();
+  if(!confirm('계정과 저장된 모든 기록을 이 브라우저에서 지웁니다.\n되돌릴 수 없습니다. 계속할까요?')) return;
+  const original = S.acc, key = S.masterKey;
+  const result = await accounts.erase(original.id, JSON.stringify(original), () => S.acc === original && S.masterKey === key);
+  if(result.cancelled) return;
+  if(!result.ok) return alert('계정을 삭제하지 못했습니다. 다른 탭의 변경이나 저장 공간을 확인해 주세요.');
+  ls.del(LKEY); alert('삭제했습니다.'); logout();
 };
+
+// Another tab cannot leave an older unlocked session able to restore stale credentials or records.
+window.addEventListener('storage', e => {
+  if(e.key !== null && e.key !== AKEY) return;
+  const acc = S.acc || (typeof pending !== 'undefined' && pending.acc) || flow.acc;
+  if(!acc || JSON.stringify(accounts.byId(acc.id)) === JSON.stringify(acc)) return;
+  logout();
+  $('ok-login').textContent = '다른 탭에서 계정이나 기록이 변경되어 잠갔습니다. 최신 기록을 보려면 다시 로그인해 주세요.';
+  $('ok-login').hidden = false;
+});
 
 /* ═══════════════════════════════════════════════════════════
    M. 앱 이벤트
@@ -149,7 +157,7 @@ $('ttsRate').oninput = e => { rate = +e.target.value; $('ttsRateVal').textConten
 function speak(text){
   if(!('speechSynthesis' in window)) return;
   speechSynthesis.cancel();
-  const privateMode = typeof CONFIG !== 'undefined' && CONFIG.privacy;
+  const privateMode = true;       // 읽어주기는 항상 기기 안의 음성만 씁니다(원격 음성 엔진에 보고서 문장이 나가지 않도록)
   const v = speechSynthesis.getVoices().find(x=>x.lang && x.lang.startsWith('ko') && (!privateMode || x.localService === true));
   if(privateMode && !v){
     $('checkMsg').hidden = false;
@@ -177,7 +185,7 @@ $('copyQ').onclick = async e => {
 };
 
 $('saveScan').onclick = async () => {
-  if(!S.analysis || !S.src || S.guest || $('saveScan').disabled) return;
+  if(!S.analysis || !S.src || $('saveScan').disabled) return;
   const account = S.acc, scans = S.scans, analysis = S.analysis, source = S.src;
   $('saveScan').disabled = true;
   const previousScans = S.scans.slice();
@@ -195,7 +203,7 @@ $('saveScan').onclick = async () => {
   if(result.cancelled || S.acc !== account || S.scans !== scans) return;
   if(!result.ok){
     S.scans = previousScans;
-    $('saveScan').disabled = S.guest || !S.analysis || !S.src;
+    $('saveScan').disabled = !S.analysis || !S.src;
     alert('저장 공간이 부족해 기록하지 못했습니다. 오래된 회차를 지운 뒤 다시 시도해 주세요.'); return;
   }
   renderTimeline(); renderAccount();
@@ -225,7 +233,7 @@ $('tlScroll').addEventListener('click', e => {
   im.src = s.thumb;
 });
 $('clearScans').onclick = async () => {
-  if(!S.scans.length || S.guest || !S.acc) return;
+  if(!S.scans.length || !S.acc) return;
   if(!confirm('저장된 회차 기록을 모두 지웁니다. 되돌릴 수 없습니다.')) return;
   const previousScans = S.scans;
   const account = S.acc, cleared = [];
@@ -233,7 +241,7 @@ $('clearScans').onclick = async () => {
   const result = await saveVault();
   if(result.cancelled || S.acc !== account || S.scans !== cleared) return;
   if(!result.ok){ S.scans = previousScans; alert('기록 삭제를 저장하지 못했습니다. 다시 시도해 주세요.'); }
-  $('saveScan').disabled = S.guest || !S.analysis || !S.src;
+  $('saveScan').disabled = !S.analysis || !S.src;
   renderTimeline(); renderAccount();
 };
 
@@ -251,15 +259,11 @@ renderGlossary();
 $('engineBadge').textContent = '엔진 · ' + ENGINE.name;
 $('backendBadge').textContent = '인증 방식 확인 중…';
 AuthBackend.detect().then(mode => {
-  $('backendBadge').textContent = CONFIG.privacy ? '개인정보 보호 모드' : mode === 'server' ? '메일 인증' : '데모 인증';
+  $('backendBadge').textContent = mode === 'server' ? '메일 인증' : mode === 'local' ? '기기 전용 로그인' : '데모 인증';
 });
-if(CONFIG.privacy){
-  showLanding();
-} else if(!SUBTLE){
-  $('scr-login').innerHTML = '<h2>안전하게 저장할 수 없는 환경입니다</h2>'
-    + '<p class="lede">이 브라우저에서는 암호화 기능(Web Crypto)을 쓸 수 없어 계정 기능을 켜지 않습니다. 분석 기능만 사용할 수 있습니다.</p>'
-    + '<button class="btn primary full" id="goGuest2">저장 없이 사용하기</button>';
-  $('goGuest2').onclick = () => { S.guest = true; enterApp(); };
+if(!SUBTLE){
+  $('scr-login').innerHTML = '<h2>안전하게 로그인할 수 없는 환경입니다</h2>'
+    + '<p class="lede">이 브라우저에서는 암호화 기능(Web Crypto)을 쓸 수 없어 로그인과 계정 저장을 할 수 없습니다. 최신 Chrome·Edge·Safari에서 localhost 또는 https 주소로 열어 주세요.</p>';
   show('login');
 } else {
   show('login');

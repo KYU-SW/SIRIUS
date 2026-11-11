@@ -7,8 +7,8 @@ const context = vm.createContext({});
 vm.runInContext(readFileSync(new URL('../js/engine.js', import.meta.url), 'utf8'), context);
 const validate = vm.runInContext('validateModelResponse', context);
 
-test('개인정보 보호 모드는 원격 사이트에서 MRI 전송과 캔버스 접근 전에 차단한다', async () => {
-  const isolated = vm.createContext({CONFIG:{privacy:true}, location:{hostname:'remote.example'},
+test('원격 사이트에서는 항상 MRI 전송과 캔버스 접근 전에 차단한다', async () => {
+  const isolated = vm.createContext({location:{hostname:'remote.example'},
     fetch(){throw new Error('network must not run');}});
   vm.runInContext(readFileSync(new URL('../js/engine.js', import.meta.url), 'utf8'), isolated);
   const analyze = vm.runInContext('modelAnalyze', isolated);
@@ -17,7 +17,7 @@ test('개인정보 보호 모드는 원격 사이트에서 MRI 전송과 캔버�
 
 test('나가기 후 완료된 JPEG 변환은 MRI 요청을 보내지 않는다', async () => {
   let finish;
-  const isolated = vm.createContext({fetch(){assert.fail('cancelled image must not be sent');}});
+  const isolated = vm.createContext({location:{hostname:'localhost'},fetch(){assert.fail('cancelled image must not be sent');}});
   vm.runInContext(readFileSync(new URL('../js/engine.js', import.meta.url), 'utf8'), isolated);
   isolated.heuristicAnalyze = () => ({});
   const work = isolated.modelAnalyze({toBlob(callback){finish=callback;}});
@@ -28,7 +28,7 @@ test('나가기 후 완료된 JPEG 변환은 MRI 요청을 보내지 않는다',
 
 test('나가기는 이미 진행 중인 MRI 전송 요청도 중단한다', async () => {
   let signal;
-  const isolated = vm.createContext({AbortController,setTimeout,clearTimeout,
+  const isolated = vm.createContext({location:{hostname:'localhost'},AbortController,setTimeout,clearTimeout,
     fetch(url,options){signal=options.signal; return new Promise((resolve,reject)=>{
       signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});
     });}});

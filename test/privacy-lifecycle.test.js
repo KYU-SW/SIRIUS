@@ -12,7 +12,7 @@ function app(voices=[]){
   const speech={cancel(){},getVoices:()=>voices,speak:u=>spoken.push(u)};
   let landing=0, timerId=0;
   const state={guest:true,scans:[],img:{},src:{},email:'synthetic@example.com',name:'Synthetic'};
-  const context=vm.createContext({$,S:state,flow:{},CONFIG:{privacy:true},SUBTLE:true,
+  const context=vm.createContext({$,S:state,flow:{},CONFIG:{privacy:false},SUBTLE:true,show(){},ls:{get(){return null;}},OLD2:'x',accounts:{all:()=>({})},
     window:{addEventListener(){},speechSynthesis:speech},speechSynthesis:speech,
     SpeechSynthesisUtterance:class{constructor(text){this.text=text;}},
     document:{querySelectorAll:()=>[]},ctx:{clearRect(){}},cv:{width:128,height:128},
@@ -26,7 +26,7 @@ function app(voices=[]){
   return {context,state,nodes,$,timers,spoken,landing:()=>landing};
 }
 
-test('익명 분석에도 유휴 잠금이 걸리고 나갈 때 영상·인증 임시값을 지운다',()=>{
+test('로그인 상태에도 유휴 잠금이 걸리고 나갈 때 영상·인증 임시값을 지운다',()=>{
   const a=app();
   a.$('app').hidden=false;
   a.$('recKey').textContent='synthetic-recovery-key';
@@ -42,7 +42,7 @@ test('익명 분석에도 유휴 잠금이 걸리고 나갈 때 영상·인증 �
   assert.equal(a.$('recKey').textContent,'');
   assert.equal(Object.keys(a.context.AuthBackend.tokens).length,0);
   assert.equal(Object.keys(a.context.DemoMail.boxes).length,0);
-  assert.equal(a.landing(),2);
+  assert.equal(a.landing(),1); // 부팅 시 랜딩 1회, 유휴 잠금 후에는 로그인 화면
 });
 
 test('개인정보 보호 모드에서 원격 음성 엔진을 사용하지 않는다',()=>{

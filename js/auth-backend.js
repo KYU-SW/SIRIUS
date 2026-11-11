@@ -9,7 +9,7 @@
    전환은 js/config.js 의 CONFIG.auth 한 줄만 바꾸면 됩니다.
    ═══════════════════════════════════════════════════════════ */
 const AuthBackend = {
-  mode: (typeof CONFIG !== 'undefined' && CONFIG.auth) || 'demo',
+  mode: (typeof CONFIG !== 'undefined' && CONFIG.auth) || 'local',
   base: (typeof CONFIG !== 'undefined' && CONFIG.apiBase) || '',
   tokens: {},                                  // purpose별 발급 티켓 (서버 모드)
 
@@ -24,9 +24,9 @@ const AuthBackend = {
       try{
         const r = await fetch(this.base + '/api/health', {cache:'no-store'});
         const d = await r.json();
-        this.mode = (d && d.ok && d.mail) ? 'server' : 'demo';
+        this.mode = (d && d.ok && d.mail) ? 'server' : 'local';
       }catch(e){
-        this.mode = 'demo';
+        this.mode = 'local';
       }
       return this.mode;
     })();
@@ -34,6 +34,7 @@ const AuthBackend = {
   },
 
   async post(path, body){
+    if(this.mode === 'local') throw new Error('기기 전용 로그인은 계정 정보를 전송하지 않습니다.');
     if(typeof CONFIG !== 'undefined' && CONFIG.privacy) throw new Error('개인정보 보호 모드에서는 계정 정보를 전송하지 않습니다.');
     let res;
     try{
@@ -53,18 +54,17 @@ const AuthBackend = {
 
   /* 인증번호 발송. purpose: 'signup' | 'findid' | 'findpw' */
   async sendCode(purpose, email){
+    if(this.mode !== 'server') throw new Error('기기 전용 로그인은 이메일과 인증번호를 사용하지 않습니다.');
     if(this.mode === 'server'){
       const r = await this.post('/api/send-code', {purpose, email});
       this.tokens[purpose] = r.token;          // 서버가 암호화해 준 티켓 (내용은 못 봄)
       return { sent:true };                    // 인증번호는 메일로만 전달됨
     }
-    const code = makeCode(6);
-    DemoMail.put(purpose, email, code);
-    return { sent:true, demoCode: code };
   },
 
   /* 인증번호 확인 */
   async verifyCode(purpose, email, code){
+    if(this.mode !== 'server') return {ok:false, reason:'이메일 인증을 사용하지 않습니다.'};
     if(this.mode === 'server'){
       const token = this.tokens[purpose];
       if(!token) return {ok:false, reason:'먼저 인증번호를 받아 주세요.'};
@@ -74,7 +74,6 @@ const AuthBackend = {
         return r.ok ? {ok:true} : {ok:false, reason: r.reason || '인증번호가 맞지 않습니다.'};
       }catch(e){ return {ok:false, reason:e.message}; }
     }
-    return DemoMail.check(purpose, email, code);
   },
 
   /* 아이디가 이미 쓰이고 있는지 (서버 등록부 기준)

@@ -70,6 +70,7 @@ function buildBrowser({ hostname = '127.0.0.1', voices = [], seedStorage = {}, f
     setAttribute(n, v) { this.attrs.set(n, String(v)); }
     removeAttribute(n) { this.attrs.delete(n); }
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); }
+    removeEventListener(t, fn) { this.listeners[t] = (this.listeners[t] || []).filter(f => f !== fn); }
     click() { const ev = { target: this, currentTarget: this, preventDefault() {}, stopPropagation() {} }; if (this.onclick) this.onclick(ev); (this.listeners.click || []).forEach(fn => fn(ev)); }
     appendChild(c) { c.parent = this; this.children.push(c); return c; }
     focus() {} scrollIntoView() {} remove() {}
@@ -92,7 +93,7 @@ function buildBrowser({ hostname = '127.0.0.1', voices = [], seedStorage = {}, f
       any = true;
       if (m[1] && e.id !== m[1]) return false;
       if (m[2] && !e._classes().has(m[2])) return false;
-      if (m[3] && (!e.attrs.has(m[3]) || (m[4] !== undefined && e.attrs.get(m[3]) !== m[4]))) return false;
+      if (m[3] && (!e.attrs.has(m[3]) || (m[4] !== undefined && e.attrs.get(m[3]) !== m[4].replace(/^["']|["']$/g, '')))) return false;
       if (m[5] && e.tag !== m[5]) return false;
     }
     return any;
@@ -124,7 +125,7 @@ function buildBrowser({ hostname = '127.0.0.1', voices = [], seedStorage = {}, f
   }
   const htmlEl = new El('html'); const body = new El('body');
   const doc = {
-    body, documentElement: htmlEl, createElement: tag => new El(tag),
+    body, documentElement: htmlEl, createElement: tag => new El(tag), addEventListener() {}, removeEventListener() {},
     getElementById: id => byId.get(id) ?? null,
     querySelectorAll: sel => all(root).filter(e => matches(e, sel)),
     querySelector: sel => all(root).find(e => matches(e, sel)) || null
@@ -164,7 +165,7 @@ function buildBrowser({ hostname = '127.0.0.1', voices = [], seedStorage = {}, f
     },
     fetch: fakeFetch, Image: FakeImage, FileReader: FakeReader,
     speechSynthesis, SpeechSynthesisUtterance: class { constructor(t) { this.text = t; } },
-    navigator: { clipboard: { writeText: async () => {} } },
+    navigator: { locks: { request: async (_name, work) => work() }, clipboard: { writeText: async () => {} } },
     getComputedStyle: () => ({ getPropertyValue: () => '#2563EB' }),
     requestAnimationFrame: fn => fn(),
     setTimeout: (fn, ms) => { const id = ++timerSeq; timers.set(id, { fn, ms }); return id; },
@@ -176,6 +177,7 @@ function buildBrowser({ hostname = '127.0.0.1', voices = [], seedStorage = {}, f
   };
   sandbox.window = sandbox;
   sandbox.addEventListener = () => {};
+  sandbox.removeEventListener = () => {};
   sandbox.scrollTo = () => {};
   sandbox.print = () => {};
   sandbox.matchMedia = () => ({ matches: false });
@@ -195,11 +197,179 @@ const TRACK_TEXT = ['vTitle', 'vConf', 'report', 'findings', 'confPct', 'confNot
   'scanLabel', 'fbSeries', 'fbSize', 'fbTime', 'fbQuality', 'checkMsg', 'tlScroll'];
 const TRACK_WRAPPERS = ['confWrap', 'probsWrap', 'checkBox'];
 const snapshot = b => Object.fromEntries(TRACK_TEXT.map(id => [id, b.el(id).textContent + '|' + b.el(id).innerHTML]));
+/* 합성 계정으로 로그인한 상태를 만든다(실제 계정·비밀번호·저장소 없이). 키가 없으므로 저장은 되지 않는다. */
+function login(b) {
+  b.g(`S.acc = { id: 'synthetic_user', emailMask: 'sy***@e***.com', created: '2026-01-01T00:00:00Z' };
+       S.masterKey = { synthetic:true }; S.name = 'Synthetic'; S.email = 'synthetic@example.com'; S.scans = []; S.guest = false; enterApp();`);
+}
 async function analyzeOnce(b) {
-  b.click('heroStart');
+  login(b);
   b.g('loadFile')(b.pngFile);
   await b.flush();
 }
+
+function syntheticVf(b){
+  b.g(`VFS.tests=[{date:'2026-01-01',eye:'R',th:VF.grid('R').map(()=>20),un:[],rel:{fp:0,fpN:10,fl:0,flN:10,fn:0,fnN:5},reliable:true,dist:33}];VFS.dirty=true;go('field');`);
+}
+
+test('고급 시야 암호화 도중 로그아웃·화면 이동하면 늦은 파일 다운로드를 하지 않는다',async()=>{
+  for(const leave of ['logout','navigate']){
+    const b=buildBrowser();login(b);syntheticVf(b);
+    let release,args,downloads=0;
+    const real=b.g('kdf');b.context.kdf=(...a)=>{args=a;return new Promise(r=>release=r)};
+    b.context.URL={createObjectURL(){downloads++;return 'blob:synthetic';},revokeObjectURL(){}};
+    b.g("vfOpenFile('save')");
+    b.el('vfPass').value=b.el('vfPass2').value='Synthetic-file-passphrase!123';
+    const work=b.el('vfFileGo').onclick();
+    if(leave==='logout')b.click('lockBtn');else b.g("go('analyze')");
+    release(await real(...args));await work;
+    assert.equal(downloads,0);
+    assert.equal(b.el('vfPass').value,'');
+    assert.equal(b.el('vfFilePanel').hidden,true);
+    if(leave==='logout')assert.equal(b.g('VFS.tests.length'),0);
+  }
+});
+
+test('고급 시야 파일 읽기 도중 계정을 바꾸면 이전 기록이 새 세션에 들어오지 않는다',async()=>{
+  const b=buildBrowser();login(b);syntheticVf(b);
+  const text=await b.g("VFFile.encrypt({tests:VFS.tests,symptoms:[],rules:VFS.rules},'Synthetic-file-passphrase!123')");
+  b.g("VFS.dirty=false;vfOpenFile('load')");
+  let release;
+  b.el('vfFileIn').files=[{size:text.length,text:()=>new Promise(r=>release=r)}];
+  b.el('vfPass').value='Synthetic-file-passphrase!123';
+  const work=b.el('vfFileGo').onclick();
+  b.click('lockBtn');login(b);
+  release(text);await work;
+  assert.equal(b.g('VFS.tests.length'),0);
+  assert.equal(b.el('vfFilePanel').hidden,true);
+  assert.equal(b.el('vfFileGo').disabled,false);
+});
+
+test('고급 시야 파일 저장 중 추가한 기록은 저장 완료로 표시하지 않는다',async()=>{
+  const b=buildBrowser();login(b);syntheticVf(b);
+  let release,args,content;
+  const real=b.g('kdf');b.context.kdf=(...a)=>{args=a;return new Promise(r=>release=r)};
+  b.context.URL={createObjectURL(blob){content=blob.text();return 'blob:synthetic';},revokeObjectURL(){}};
+  b.g("vfOpenFile('save')");b.el('vfPass').value=b.el('vfPass2').value='Synthetic-file-passphrase!123';
+  const work=b.el('vfFileGo').onclick();
+  b.g("VFS.tests.push({...VFS.tests[0],date:'2026-01-02'})");
+  release(await real(...args));await work;
+  assert.equal(b.g('VFS.dirty'),true);
+  assert.equal(b.g('VFS.tests.length'),2);
+  b.context.kdf=real;b.context.syntheticFile=await content;
+  const saved=await b.g("VFFile.decrypt(syntheticFile,'Synthetic-file-passphrase!123')");
+  assert.equal(saved.tests.length,1);
+});
+
+test('가입 저장 대기 중 홈으로 돌아가면 계정 쓰기와 늦은 복구 키 화면을 취소한다', async () => {
+  const b=buildBrowser();b.click('goSignup');
+  b.el('suId').value='synthetic_cancel';
+  b.el('suPw').value=b.el('suPw2').value='Synthetic-Test!123';
+  b.g('agreeBoxes().forEach(c => c.checked = true)');
+  const accs=b.g('accounts'),commit=accs.commit.bind(accs);
+  let release,entered;const gate=new Promise(r=>release=r),ready=new Promise(r=>entered=r);
+  accs.commit=async(...args)=>{entered();await gate;return commit(...args)};
+  const work=b.el('btnSignup').onclick();await ready;
+  b.click('authHome');release();await work;
+  assert.equal(b.g("accounts.byId('synthetic_cancel')"),null);
+  assert.equal(b.visible('landing'),true);assert.equal(b.visible('scr-recovery'),false);
+  assert.equal(b.el('recKey').textContent.trim(),'');
+  b.click('goSignup');assert.equal(b.el('btnSignup').textContent,'회원가입 완료');
+});
+
+test('비밀번호 변경 저장 대기 중 돌아가면 변경을 취소하고 숨은 인증 입력값도 지운다', async () => {
+  const b=buildBrowser();await b.g("createAccount({id:'synthetic_cancel_pw',pw:'Synthetic-Test!123'})");
+  b.el('loginId').value='synthetic_cancel_pw';b.el('loginPw').value='Synthetic-Test!123';await b.el('btnLogin').onclick();
+  const before=b.g('JSON.stringify(S.acc)');b.g("show('chpw')");
+  b.el('cpOld').value='Synthetic-Test!123';b.el('cpNew').value=b.el('cpNew2').value='Updated-Test!456';
+  const accs=b.g('accounts'),commit=accs.commit.bind(accs);let release,entered;
+  const gate=new Promise(r=>release=r),ready=new Promise(r=>entered=r);
+  accs.commit=async(...args)=>{entered();await gate;return commit(...args)};
+  const work=b.el('btnChPw').onclick();await ready;b.click('cp2app');release();await work;
+  assert.equal(b.g('JSON.stringify(S.acc)'),before);assert.equal(b.visible('app'),true);
+  for(const id of ['cpOld','cpNew','cpNew2'])assert.equal(b.el(id).value,'');
+  b.el('npRec').value='synthetic-recovery-marker';b.el('npPw').value='Synthetic-Test!123';b.click('lockBtn');
+  for(const id of ['npRec','npPw','npPw2','loginPw'])assert.equal(b.el(id).value,'');
+});
+
+test('로그인 후 인증 화면에서도 유휴 잠금이 유지되고 홈으로 나가면 보관함을 잠근다', async () => {
+  const b=buildBrowser();await b.g("createAccount({id:'synthetic_gate_idle',pw:'Synthetic-Test!123'})");
+  const login=async()=>{b.el('loginId').value='synthetic_gate_idle';b.el('loginPw').value='Synthetic-Test!123';await b.el('btnLogin').onclick()};
+  await login();b.g("show('chpw');resetIdle()");
+  const idle=[...b.timers.values()].find(t=>t.ms===600000&&!t.interval);assert.ok(idle);
+  idle.fn();assert.equal(b.g('S.masterKey'),null);assert.equal(b.visible('app'),false);
+  await login();b.g("show('chpw')");b.click('authHome');assert.equal(b.g('S.masterKey'),null);
+  assert.equal(b.g('S.acc'),null);assert.equal(b.visible('landing'),true);
+});
+
+test('기기 전용 실제 가입·로그인은 이메일이나 인증번호 없이 암호화 계정을 연다', async () => {
+  const b = buildBrowser();
+  b.click('goSignup');
+  b.el('suId').value = 'synthetic_local';
+  b.el('suPw').value = b.el('suPw2').value = 'Synthetic-Test!123';
+  b.g('agreeBoxes().forEach(c => c.checked = true)');
+  await b.g('checkIdNow()');
+  assert.equal(b.el('btnSignup').disabled, false);
+  assert.equal(b.visible('suEmail'), false);
+  await b.el('btnSignup').onclick();
+  assert.equal(b.g("accounts.byId('synthetic_local').emailMask"), '');
+  b.el('recSaved').checked = true;
+  await b.el('btnRecDone').onclick();
+  b.el('loginPw').value = 'Synthetic-Test!123';
+  await b.el('btnLogin').onclick();
+  assert.equal(b.visible('app'), true);
+  assert.equal(b.fetchLog.length, 0);
+  assert.equal(b.el('lgDemoCode').textContent.trim(), '');
+  b.click('lockBtn');
+  assert.equal(b.visible('app'), false);
+  assert.equal(b.g('S.masterKey'), null);
+});
+
+test('비밀번호 확인 도중 취소하면 늦은 복호화가 로그인 화면을 다시 열지 못한다', async () => {
+  const b = buildBrowser();
+  await b.g("createAccount({id:'synthetic_local',pw:'Synthetic-Test!123'})");
+  b.el('loginId').value = 'synthetic_local';
+  b.el('loginPw').value = 'Synthetic-Test!123';
+  const work = b.el('btnLogin').onclick();
+  b.g('clearPending()');
+  await work;
+  assert.equal(b.visible('app'), false);
+  assert.equal(b.g('S.acc'), null);
+});
+
+test('복구 키 재발급 뒤 새 계정 가입이 로그인 없이 앱을 열지 않는다', async () => {
+  const b=buildBrowser();
+  await b.g("createAccount({id:'synthetic_first',pw:'Synthetic-Test!123'})");
+  b.el('loginId').value='synthetic_first'; b.el('loginPw').value='Synthetic-Test!123';
+  await b.el('btnLogin').onclick();
+  await b.el('newRecBtn').onclick();
+  b.el('recSaved').checked=true;
+  await b.el('btnRecDone').onclick();
+  assert.equal(b.visible('app'),true);
+  b.click('lockBtn'); b.click('goSignup');
+  b.el('suId').value='synthetic_second';
+  b.el('suPw').value=b.el('suPw2').value='Synthetic-Test!123';
+  b.g('agreeBoxes().forEach(c => c.checked = true)');
+  await b.g('checkIdNow()'); await b.el('btnSignup').onclick();
+  b.el('recSaved').checked=true; await b.el('btnRecDone').onclick();
+  assert.equal(b.visible('app'),false);
+  assert.equal(b.g('S.masterKey'),null);
+  assert.equal(b.g('S.acc'),null);
+});
+
+test('복구 키 저장 실패는 기존 키와 계정 상태를 변경하지 않는다', async () => {
+  const b=buildBrowser();
+  await b.g("createAccount({id:'synthetic_first',pw:'Synthetic-Test!123'})");
+  b.el('loginId').value='synthetic_first'; b.el('loginPw').value='Synthetic-Test!123';
+  await b.el('btnLogin').onclick();
+  const before=b.g('JSON.stringify(S.acc)');
+  b.g('accounts.save = () => false');
+  await b.el('newRecBtn').onclick();
+  assert.equal(b.g('JSON.stringify(S.acc)'),before);
+  assert.equal(b.visible('scr-recovery'),false);
+  assert.equal(b.el('recKey').textContent,'');
+  assert.match(b.alerts.at(-1),/이전 키는 유지/);
+});
 
 /* ═══════════════ 2. 정적 점검 (코드·마크업) ═══════════════ */
 test('정적 점검: index.html 에 인라인 스크립트·이벤트 속성·외부 주소가 없고 CSP 가 외부 연결을 막는다', () => {
@@ -235,53 +405,43 @@ test('정적 점검: js/ 에는 원격 전송·영구 저장 API 가 새로 들�
 });
 
 /* ═══════════════ 3. 브라우저 흐름 (가짜 DOM) ═══════════════ */
-test('하네스 점검: 기본 설정은 익명 모드이며 부팅 후 랜딩만 보인다', () => {
+test('하네스 점검: 부팅 후 랜딩만 보이고, 익명(둘러보기) 진입 기능이 없다', () => {
   const b = buildBrowser();
-  assert.equal(b.g('CONFIG.privacy'), true);
+  assert.equal(b.g('CONFIG.privacy'), false);
   assert.equal(b.visible('landing'), true);
   assert.equal(b.visible('gate'), false);
   assert.equal(b.visible('app'), false);
+  assert.equal(b.g('typeof enterGuest'), 'undefined');
+  assert.equal(b.el('goGuest'), undefined, '둘러보기 버튼이 남아 있음');
 });
 
-test('익명 모드: 시작·로그인·회원가입·가이드·기록·마이페이지 어디서도 이름/이메일 입력 화면이 열리지 않는다', async () => {
-  const seeded = { 'mri-accounts-v3': JSON.stringify({ demo_user: { id: 'demo_user', emailMask: 'de***@e******.com', created: '2026-01-01T00:00:00Z' } }) };
-  const inputs = ['suName', 'suId', 'suEmail', 'suPw', 'loginId', 'loginPw', 'fiEmail', 'fpEmail'];
-  const entries = ['toLoginTop', 'toSignupTop', 'heroStart', 'goSignup', 'btnSignup', 'goGuest'];
+test('로그인 필수: 시작·가이드·FAQ·시야 기록 어느 진입점도 로그인 없이 앱 화면을 열지 못한다', async () => {
+  const entries = ['toLoginTop', 'toSignupTop', 'heroStart'];
   for (const id of entries) {
-    const b = buildBrowser({ seedStorage: seeded });
+    const b = buildBrowser();
     b.click(id);
     await b.flush();
-    assert.equal(b.visible('gate'), false, id + ' → 인증 화면');
-    for (const f of inputs) assert.equal(b.visible(f), false, `${id} → ${f} 노출`);
-    assert.equal(b.visible('app'), true, id + ' → 분석 화면으로 진입');
-    assert.equal(b.g('S.guest'), true);
-    assert.equal(b.g('S.acc'), null);
+    assert.equal(b.visible('gate'), true, id + ' → 로그인/가입 화면');
+    assert.equal(b.visible('app'), false, id + ' → 로그인 없이 앱이 열림');
+    assert.equal(b.g('S.guest'), false); assert.equal(b.g('S.acc'), null);
   }
-  const b = buildBrowser({ seedStorage: seeded });
-  b.click('heroStart');
-  for (const go of ['history', 'mypage', 'result']) {
-    b.byId.get('lockBtn');                       // 존재 확인
-    b.g(`go('${go}')`);
-    assert.equal(b.visible('gate'), false, go);
-    for (const f of inputs) assert.equal(b.visible(f), false, `${go} → ${f}`);
+  const b = buildBrowser();
+  for (const nav of b.doc.querySelectorAll('[data-landing]')) {
+    if (nav.attrs.get('data-landing') === 'about') continue;
+    b.g('showLanding()');
+    nav.click();
+    assert.equal(b.visible('app'), false, nav.attrs.get('data-landing') + ' → 로그인 없이 앱이 열림');
+    assert.equal(b.visible('gate'), true);
   }
-  b.click('acctBtn'); b.click('a11yBtn');
-  assert.equal(b.visible('gate'), false);
-  for (const nav of b.doc.querySelectorAll('[data-landing]')) { nav.click(); assert.equal(b.visible('gate'), false); }
-  b.click('lockBtn');
-  assert.equal(b.visible('landing'), true); assert.equal(b.visible('gate'), false); assert.equal(b.visible('app'), false);
+  const forbidden = /익명 분석|저장 없이 시작|이름·이메일 입력 없이|둘러보기 모드|기본 익명 모드/;
+  assert.doesNotMatch(INDEX_HTML, forbidden, '화면 문구에 익명 이용 안내가 남아 있음');
 });
 
-test('익명 모드: 저장소 쓰기는 화면 설정뿐이고 네트워크 호출은 이 컴퓨터의 /api/analyze(JPEG) 하나뿐이다', async () => {
+test('로그인 상태: 네트워크 호출은 이 컴퓨터의 /api/analyze(JPEG) 하나뿐이고 저장을 누르기 전에는 저장소에 쓰지 않는다', async () => {
   const b = buildBrowser();
   await analyzeOnce(b);
   assert.equal(b.g('S.analysis.kind'), 'model');
   b.click('themeBtn3'); b.click('cvdBtn');
-  b.el('cost').value = '480000';
-  await b.el('saveScan').onclick();                       // 비활성 버튼이어도 호출돼도 저장되면 안 됨
-  assert.equal(JSON.stringify(await b.g('saveVault()')), '{"ok":false}');
-  await assert.rejects(b.g("createAccount({id:'demo_user', email:'a@b.co', pw:'Aa1!aaaa'})"), /계정을 만들지 않습니다/);
-  await assert.rejects(b.g("AuthBackend.post('/api/send-code', {email:'a@b.co'})"), /전송하지 않습니다/);
   b.click('lockBtn');
   assert.ok(b.storageWrites.every(k => ['neuria-theme', 'neuria-cvd'].includes(k)), JSON.stringify(b.storageWrites));
   assert.deepEqual(b.cookieWrites, []);
@@ -291,7 +451,7 @@ test('익명 모드: 저장소 쓰기는 화면 설정뿐이고 네트워크 호
   assert.equal(b.fetchLog[0].headers['Content-Type'], 'image/jpeg');
 });
 
-test('익명 모드: 로컬이 아닌 주소에서 열면 영상을 보내지 않고 브라우저 안 데모 엔진으로 대체한다', async () => {
+test('로컬이 아닌 주소에서 열면 영상을 보내지 않고 브라우저 안 데모 엔진으로 대체한다', async () => {
   for (const hostname of ['example.com', 'localhost.evil.example', '127.0.0.1.evil.example', '']) {
     const b = buildBrowser({ hostname });
     await analyzeOnce(b);
@@ -303,7 +463,7 @@ test('익명 모드: 로컬이 아닌 주소에서 열면 영상을 보내지 �
 test('나가기 직후 늦게 도착한 분석 응답과 이미지 로드는 화면·메모리에 남지 않는다', async () => {
   const b = buildBrowser({ fetchMode: 'hold' });
   const bootTitle = b.el('vTitle').textContent;          // 부팅 직후 안내 문구 (분석 결과가 아님)
-  b.click('heroStart');
+  login(b);
   b.g('loadFile')(b.pngFile);
   await b.flush();
   assert.equal(b.pendingFetches.length, 1);
@@ -319,7 +479,7 @@ test('나가기 직후 늦게 도착한 분석 응답과 이미지 로드는 화
   assert.equal(b.visible('app'), false);
 
   // 다시 들어온 뒤에도 첫 번째 세션의 응답은 나타나지 않는다
-  b.click('heroStart');
+  login(b);
   const second = (b.g('loadFile')(b.pngFile), b.flush());
   await second;
   const late = b.pendingFetches[0]; const fresh = b.pendingFetches[1];
@@ -329,17 +489,17 @@ test('나가기 직후 늦게 도착한 분석 응답과 이미지 로드는 화
   assert.equal(b.g('S.analysis.kind'), 'model');
 
   // 파일 읽기·이미지 디코딩 도중에 나가도 결과가 만들어지지 않는다
-  const c = buildBrowser(); c.click('heroStart');
+  const c = buildBrowser(); login(c);
   c.hold.reader = true; c.g('loadFile')(c.pngFile); c.click('lockBtn');
   c.readers[0].onload({ target: { result: 'data:image/png;base64,AAAA' } }); await c.flush();
   assert.equal(c.fetchLog.length, 0); assert.equal(c.g('S.img'), null);
-  const d = buildBrowser(); d.click('heroStart');
+  const d = buildBrowser(); login(d);
   d.hold.images = true; d.g('loadFile')(d.pngFile); await d.flush();
   d.click('lockBtn'); d.images.at(-1).onload && d.images.at(-1).onload(); await d.flush();
   assert.equal(d.fetchLog.length, 0); assert.equal(d.g('S.img'), null);
 });
 
-test('익명 모드: 화면에 넣는 텍스트는 이스케이프되고 서버가 준 모델 이름은 textContent 로만 쓰인다', async () => {
+test('로그인 상태: 화면에 넣는 텍스트는 이스케이프되고 서버가 준 모델 이름은 textContent 로만 쓰인다', async () => {
   const evil = '<img src=x onerror=alert(1)>';
   const b = buildBrowser({ modelName: evil });
   await analyzeOnce(b);
@@ -352,7 +512,7 @@ test('익명 모드: 화면에 넣는 텍스트는 이스케이프되고 서버�
 });
 
 /* ───── 검토에서 확인한 결함의 회귀 방지 검사 ───── */
-test('익명 모드에도 10분 유휴 잠금이 적용된다 (F-01)', async () => {
+test('로그인 상태에도 10분 유휴 잠금이 적용된다 (F-01)', async () => {
   const b = buildBrowser();
   await analyzeOnce(b);
   const idle = [...b.timers.values()].find(t => t.ms === 10 * 60 * 1000 && !t.interval);
@@ -371,7 +531,7 @@ test('나가기 후 다시 들어와도 이전 결과 요약·확률·질문·�
   b.click('lockBtn');
   assert.equal(sourceCanvas.width, 0);
   assert.equal(sourceCanvas.height, 0);
-  b.click('heroStart');                                   // 새 세션
+  login(b);                                               // 새 세션
   const after = snapshot(b);
   const stale = TRACK_TEXT.filter(id => after[id] !== before[id]);
   assert.deepEqual(stale, [], '남아 있는 요소: ' + stale.join(', '));
@@ -381,7 +541,7 @@ test('나가기 후 다시 들어와도 이전 결과 요약·확률·질문·�
 
 test('나가기는 진행 중이던 /api/analyze 요청을 중단한다 (F-03)', async () => {
   const b = buildBrowser({ fetchMode: 'hold' });
-  b.click('heroStart');
+  login(b);
   b.g('loadFile')(b.pngFile);
   await b.flush();
   assert.equal(b.fetchLog.length, 1);
@@ -412,16 +572,16 @@ test('저장된 기록 데이터(thumb·status·이름)를 HTML 에 그대로 �
   assert.doesNotMatch(report, /<img/i);
 });
 
-test('부팅 중에도 로그인/가입 화면(gate)이 한 번도 열리지 않는다 (F-08)', () => {
+test('부팅이 끝났을 때 로그인 화면이 아니라 랜딩이 보이고 앱은 닫혀 있다 (F-08)', () => {
   const b = buildBrowser();
-  const opened = b.hiddenLog.filter(h => h.id === 'gate' && h.value === false);
-  assert.deepEqual(opened, []);
+  assert.equal(b.visible('landing'), true); assert.equal(b.visible('gate'), false); assert.equal(b.visible('app'), false);
 });
 
-test('안내 문구가 익명 모드 구현과 모순되지 않는다 (F-09)', () => {
+test('안내 문구가 로그인 필수 구현과 모순되지 않는다 (F-09)', () => {
   assert.doesNotMatch(INDEX_HTML, /브라우저 메모리에서만 처리/, '영상은 이 컴퓨터의 분석 서버(별도 프로세스)로도 전송됨');
-  assert.doesNotMatch(INDEX_HTML, /로그인할 때마다 인증번호를 받아야 하나요/, '기본 모드에는 로그인·인증번호가 없음');
-  assert.doesNotMatch(INDEX_HTML, /<button class="btn sm" id="toLoginTop">로그인<\/button>/, '버튼 이름이 실제 동작(익명 분석 시작)과 다름');
+  assert.match(INDEX_HTML, /<button class="btn sm" id="toLoginTop">로그인<\/button>/);
+  assert.match(read('PRIVACY.md'), /로그인이 필요/);
+  assert.doesNotMatch(read('PRIVACY.md'), /기본 설정은 이름·이메일·비밀번호 입력 없이 사용하는 익명 분석 모드/);
 });
 
 /* ═══════════════ 4. 서버 (임시 폴더에 복사본을 띄움) ═══════════════ */
@@ -553,4 +713,120 @@ test('서버: 정적 허용 목록은 index.html 이 참조하는 스크립트·
     const r = await raw(s.port, '/js/zz-private-note.js');
     assert.notEqual(r.status, 200); assert.doesNotMatch(r.body, /PRIVATE-NOTE-MARKER/);
   } finally { await s.stop(); }
+});
+
+/* ═══════════════ 시야 기록(SIRIUS 시야 모듈) 개인정보 점검 ═══════════════ */
+function vfSeed(b) {
+  b.g(`(() => {
+    const g = VF.grid('R');
+    for (let i = 0; i < 2; i++) VFS.tests.push({ date: '2026-01-0' + (i + 1), eye: 'R', th: g.map(() => 24), un: [], rel: { fp: 0, fpN: 5, fl: 0, flN: 5, fn: 0, fnN: 3 }, reliable: true, dist: 33 });
+    VFS.symptoms.push({ date: '2026-01-02', ids: ['blur'] });
+    VFS.dirty = true; vfRenderHome(); vfRenderSummary();
+  })()`);
+  b.el('vfPass').value = 'synthetic-secret-phrase-1';
+  b.el('vfPass2').value = 'synthetic-secret-phrase-1';
+}
+const vfLeft = b => ({
+  tests: b.g('VFS.tests.length'), symptoms: b.g('VFS.symptoms.length'), dirty: b.g('VFS.dirty'), run: b.g('vfRun'),
+  pass: b.el('vfPass').value + b.el('vfPass2').value, hist: b.el('vfHistory').innerHTML, status: b.el('vfStatus').innerHTML,
+  summary: b.el('vfPrintRoot').innerHTML, trend: b.el('vfTrend').innerHTML
+});
+
+test('시야 기록: 로그인한 뒤에 열리고, 네트워크·브라우저 저장소를 쓰지 않는다', async () => {
+  const b = buildBrowser();
+  login(b); b.g("go('field')");
+  assert.equal(b.visible('gate'), false);
+  assert.equal(b.doc.querySelector('[data-page="field"]')._hidden, false, '시야 기록 페이지가 열려야 함');
+  vfSeed(b);
+  assert.match(b.el('vfHistory').innerHTML, /2026-01-01/, '하네스 점검: 기록이 화면에 그려져야 함');
+  await b.g("VFFile.encrypt({ tests: VFS.tests, symptoms: VFS.symptoms, rules: VFS.rules }, 'synthetic-secret-phrase-1')");
+  assert.equal(b.fetchLog.length, 0, '시야 기록은 네트워크를 쓰지 않는다');
+  const allowed = new Set(['neuria-theme', 'neuria-cvd', '-neuria-theme', '-neuria-cvd']);
+  assert.deepEqual(b.storageWrites.filter(k => !allowed.has(k)), [], '브라우저 저장소에는 시야 기록을 쓰지 않는다');
+  assert.equal(b.cookieWrites.length, 0);
+});
+
+test('시야 기록: 나가기를 누르면 기록·증상·요약·파일 비밀번호 입력값이 모두 사라진다', () => {
+  const b = buildBrowser();
+  login(b); b.g("go('field')");
+  vfSeed(b);
+  assert.equal(b.g('VFS.tests.length'), 2);
+  b.click('lockBtn');
+  const left = vfLeft(b);
+  assert.equal(left.tests, 0); assert.equal(left.symptoms, 0); assert.equal(left.dirty, false); assert.equal(left.run, null);
+  assert.equal(left.pass, '');
+  for (const html of [left.hist, left.status, left.summary, left.trend]) assert.doesNotMatch(html, /2026-01|synthetic/);
+  assert.equal(b.visible('app'), false);
+});
+
+test('시야 기록: 10분 유휴 잠금이 걸리면 검사 중이던 상태와 기록이 함께 지워진다', () => {
+  const b = buildBrowser();
+  login(b); b.g("go('field')");
+  vfSeed(b);
+  b.g('vfRun = { timers: [], T: VF.createTest({ eye: "R" }), paused: false }');          // 검사 도중 상황
+  const idle = [...b.timers.values()].find(t => t.ms === 10 * 60 * 1000 && !t.interval);
+  assert.ok(idle, '유휴 타이머가 있어야 함');
+  idle.fn();
+  const left = vfLeft(b);
+  assert.equal(left.tests, 0); assert.equal(left.run, null); assert.equal(left.pass, '');
+  assert.equal(b.el('vfStage')._hidden, true, '검사 화면이 닫혀야 함');
+});
+
+test('시야 기록: 화면에 넣는 모든 값은 고정 문구·숫자이고 가져온 파일의 글자는 HTML 로 해석되지 않는다', () => {
+  const b = buildBrowser();
+  login(b); b.g("go('field')");
+  b.g(`(() => {
+    const raw = { app: 'sirius-vf', v: 1, tests: [], symptoms: [{ date: '2026-01-02', ids: ['<img src=x onerror=alert(1)>', 'blur'] }], rules: { pointDrop: '<script>' } };
+    const s = VF.cleanState(raw);
+    VFS.tests = s.tests; VFS.symptoms = s.symptoms; VFS.rules = s.rules;
+    vfRenderHome(); vfRenderSummary(); vfRenderSymptom();
+  })()`);
+  for (const id of ['vfStatus', 'vfTrend', 'vfHistory', 'vfPrintRoot', 'vfRules', 'vfSymList']) assert.doesNotMatch(b.el(id).innerHTML, /<img|<script|onerror/i, id);
+  assert.equal(b.g('VFS.rules.pointDrop'), 6);
+});
+
+test('정적 점검: 시야 기록 코드에는 네트워크·저장소·동적 코드 실행이 없다', () => {
+  for (const name of ['vf-core.js', 'vf-file.js', 'vf-ui.js']) {
+    const code = read('js/' + name);
+    assert.doesNotMatch(code, /\bfetch\s*\(|localStorage|sessionStorage|indexedDB|XMLHttpRequest|sendBeacon|WebSocket|window\.open|\beval\s*\(|new Function|insertAdjacentHTML|document\.write|postMessage/, name);
+    assert.doesNotMatch(code, /https?:\/\//, name + ': 외부 주소 금지');
+  }
+});
+
+test('경과 관찰: 로그인(S.acc+masterKey) 없이는 어떤 화면도 열리지 않고, 로그인하면 홈은 경과 관찰이다', () => {
+  const b = buildBrowser();
+  for(const page of ['followup', 'analyze', 'result', 'history', 'field', 'guide', 'faq', 'mypage']){
+    b.g(`S.acc = null; S.masterKey = null; go('${page}')`);
+    assert.equal(b.visible('gate'), true, page + ' → 로그인 화면'); assert.equal(b.visible('app'), false, page + ' → 로그인 없이 앱이 열림');
+  }
+  b.g("S.acc = { id: 'synthetic_user' }; S.masterKey = null; enterApp();");
+  assert.equal(b.visible('app'), false, 'masterKey 가 없으면 enterApp 도 열리지 않음');
+  b.g("S.acc = null; S.masterKey = { x: 1 }; enterApp();");
+  assert.equal(b.visible('app'), false, 'S.acc 가 없으면 enterApp 도 열리지 않음');
+  login(b);
+  assert.equal(b.visible('app'), true);
+  assert.equal(b.el('pageTitle').textContent, '경과 관찰');
+  assert.equal(b.g('S.followup.v'), 1, '로그인 직후 S.followup 이 정제된 빈 상태로 준비됨');
+  b.g("go('analyze')"); assert.equal(b.el('pageTitle').textContent, '영상 보기');
+});
+
+test('경과 관찰: 로그아웃하면 S.followup 과 화면이 지워지고 다른 계정으로 들어가도 섞이지 않는다', () => {
+  const b = buildBrowser();
+  login(b);
+  b.g("S.followup = FU.addMri(S.followup, '2026-01-01', 18.5, '2026-11-10').state; followupEnter();");
+  assert.match(b.el('fuRoot').innerHTML, /18\.5 mm/);
+  b.click('lockBtn');
+  assert.equal(b.g('S.followup'), null);
+  assert.equal(b.el('fuRoot').innerHTML, '');
+  login(b);
+  assert.equal(b.g('S.followup.mri.length'), 0);
+  assert.doesNotMatch(b.el('fuRoot').innerHTML, /18\.5 mm/);
+});
+
+test('경과 관찰: logout() 은 기록 화면과 S.followup 을 지운다', () => {
+  const b = buildBrowser();
+  login(b);
+  b.g("S.followup = FU.addMri(S.followup, '2026-01-01', 18.5, '2026-11-10').state; followupEnter();");
+  b.g('logout()');
+  assert.equal(b.g('S.followup'), null); assert.equal(b.el('fuRoot').innerHTML, '');
 });

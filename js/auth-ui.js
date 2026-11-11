@@ -3,8 +3,16 @@
 /* ═══════════════════════════════════════════════════════════
    K. 인증 화면 제어
    ═══════════════════════════════════════════════════════════ */
+const LOCAL_AUTH = CONFIG.auth === 'local';
+let authEpoch = 0;
 const SCREENS = ['login','signup','recovery','findid','idresult','findpw','newpw','chpw'];
+function clearAuthSecrets(keep){
+  const groups={login:['loginPw','lgCode'],signup:['suPw','suPw2','suCode'],newpw:['npPw','npPw2','npRec'],chpw:['cpOld','cpNew','cpNew2'],findid:['fiCode'],findpw:['fpCode']};
+  for(const [screen,ids] of Object.entries(groups)) if(screen !== keep) for(const id of ids){ const el=$(id); if(el) el.value=''; }
+  if(keep !== 'recovery') $('recKey').textContent='';
+}
 function show(screen){
+  clearAuthSecrets(screen);
   SCREENS.forEach(s => { const el = $('scr-'+s); if(el) el.hidden = (s !== screen); });
   $('landing').hidden = true; $('gate').hidden = false; $('app').hidden = true;
   SCREENS.forEach(s => { const e = $('err-'+s); if(e) e.hidden = true; });
@@ -17,7 +25,7 @@ function fail(screen, msg){ const e = $('err-'+screen); if(e){ e.textContent = m
 /* ── 비밀번호 규칙 (모두 필수) ── */
 const SPECIAL_RE = /[~!@#$%^&*()_\-+=\[\]{}|\\;:'",.<>\/?`]/;
 const PW_RULES = [
-  {k:'len',   label:'8자 이상',    test:p => p.length >= 8},
+  {k:'len',   label:'8~256자',     test:p => p.length >= 8 && p.length <= 256},
   {k:'upper', label:'영문 대문자', test:p => /[A-Z]/.test(p)},
   {k:'lower', label:'영문 소문자', test:p => /[a-z]/.test(p)},
   {k:'spec',  label:'특수문자',    test:p => SPECIAL_RE.test(p)},
@@ -72,7 +80,7 @@ async function checkIdNow(){
   if(r.available){
     idState.available = true;
     setIdHelp(r.enforced === false
-      ? '사용할 수 있는 아이디입니다. (데모 모드 — 이 브라우저 기준으로만 확인)'
+      ? '이 브라우저에서 사용할 수 있는 아이디입니다.'
       : '사용할 수 있는 아이디입니다.', 'ok');
   } else {
     setIdHelp(r.reason === 'FORMAT' ? '영문·숫자·밑줄 4~20자만 쓸 수 있습니다.'
@@ -235,7 +243,7 @@ $('fpId').addEventListener('input', () => vFindPw.reset());
 function updateSignupBtn(){
   const id = $('suId').value.trim(), email = $('suEmail').value.trim().toLowerCase();
   const pw = $('suPw').value, pw2 = $('suPw2').value;
-  const ready = ID_RE.test(id) && !accounts.byId(id) && vSignup.isVerified(email)
+  const ready = ID_RE.test(id) && !accounts.byId(id) && (LOCAL_AUTH || vSignup.isVerified(email))
              && idState.available && idState.value === id && !idState.checking
              && pwValid(pw) && pw === pw2 && agreeOk();
   $('btnSignup').disabled = !ready;
@@ -271,7 +279,7 @@ $('suAgreeBox').addEventListener('click', e => {
 });
 
 $('goSignup').onclick = () => {
-  if(CONFIG.privacy) return enterGuest('analyze');
+  $('btnSignup').textContent = '회원가입 완료';
   ['suName','suId','suEmail','suPw','suPw2'].forEach(id => $(id).value = '');
   resetAgree();
   $('suIdHelp').textContent = '로그인에 사용합니다.'; $('suIdHelp').className = 'help';
@@ -284,37 +292,38 @@ $('goSignup').onclick = () => {
 $('su2login').onclick = () => show('login');
 
 $('btnSignup').onclick = async () => {
-  if(CONFIG.privacy) return enterGuest('analyze');
   const id = $('suId').value.trim(), email = $('suEmail').value.trim().toLowerCase();
   const pw = $('suPw').value, pw2 = $('suPw2').value;
   if(!ID_RE.test(id))       return fail('signup','아이디는 영문·숫자·밑줄 4~20자여야 합니다.');
   if(accounts.byId(id))     return fail('signup','이미 사용 중인 아이디입니다.');
-  if(!vSignup.isVerified(email)) return fail('signup','이메일 인증을 먼저 완료해 주세요.');
+  if(!LOCAL_AUTH && !vSignup.isVerified(email)) return fail('signup','이메일 인증을 먼저 완료해 주세요.');
   if(!pwValid(pw))          return fail('signup','비밀번호에 ' + pwMissing(pw).join(', ') + ' 조건이 빠졌습니다.');
   if(pw !== pw2)            return fail('signup','두 비밀번호가 서로 다릅니다.');
   if(!agreeOk())            return fail('signup','필수 약관에 모두 동의해 주세요.');
+  const epoch = ++authEpoch, name = $('suName').value.trim();
   $('btnSignup').disabled = true; $('btnSignup').textContent = '계정을 만드는 중…';
   try{
     // 먼저 서버 등록부에 아이디를 선점합니다 (다른 사용자와의 중복을 여기서 막습니다)
     try{
       await AuthBackend.reserveId(id);
+      if(epoch !== authEpoch) return;
     }catch(err){
+      if(epoch !== authEpoch) return;
       setIdHelp('이미 사용 중인 아이디입니다. 다른 아이디를 골라 주세요.', 'no');
       idState.available = false;
       return fail('signup', err.message);
     }
-    // 이전 버전에 남아 있던 기록이 있으면 이어받는다
-    const v1 = ls.get(OLD1);
-    const scans = Array.isArray(v1) && v1.length ? v1 : [];
-    const {rec} = await createAccount({id, email, pw, scans, name: $('suName').value.trim()});
-    ls.del(OLD1);
+    // 계정 간 의료 기록이 섞이지 않도록 새 계정은 빈 보관함으로 시작합니다.
+    const scans = []; // 다른 사용자의 이전 평문 기록을 새 계정에 자동 연결하지 않습니다.
+    const {rec} = await createAccount({id, email: LOCAL_AUTH ? '' : email, pw, scans, name}, () => epoch === authEpoch);
+    if(epoch !== authEpoch) return;
     flow.id = id;
     $('suPw').value = ''; $('suPw2').value = '';     // 메모리·화면에서 비밀번호 제거
     $('recKey').textContent = rec;
     $('recSaved').checked = false;
     show('recovery');
-  }catch(e){ fail('signup', e.message || '가입에 실패했습니다.'); }
-  finally{ $('btnSignup').disabled = false; $('btnSignup').textContent = '회원가입 완료'; }
+  }catch(e){ if(epoch === authEpoch) fail('signup', e.message || '가입에 실패했습니다.'); }
+  finally{ if(epoch === authEpoch){ $('btnSignup').disabled = false; $('btnSignup').textContent = '회원가입 완료'; } }
 };
 
 /* ── 복구 키 ── */
@@ -333,6 +342,12 @@ $('dlRec').onclick = () => {
 $('btnRecDone').onclick = async () => {
   if(!$('recSaved').checked) return alert('복구 키를 보관했는지 확인해 주세요.');
   $('recKey').textContent = '';
+  if(flow.recoveryReturn && S.acc && S.masterKey){
+    flow.recoveryReturn = false;
+    $('btnRecDone').textContent = '로그인하러 가기';
+    enterApp(); return;
+  }
+  flow.recoveryReturn = false;
   $('loginId').value = flow.id; $('loginPw').value = '';
   flow.id = ''; flow.email = '';
   show('login');
@@ -341,9 +356,14 @@ $('btnRecDone').onclick = async () => {
 };
 
 /* ── 로그인 ── */
-function attempts(){ return ls.get(LKEY) || {n:0, until:0}; }
+function attempts(){
+  const at = ls.get(LKEY), now = Date.now();
+  if(!at || !Number.isInteger(at.n) || at.n < 0 || at.n > 30 || !Number.isFinite(at.until) || at.until < 0 || at.until > now + 300000)
+    return {n:0, until:0};
+  return at;
+}
 /* ── 로그인 2단계: 비밀번호 확인 → 이메일 인증번호 ────────────────── */
-const pending = { acc:null, raw:null, key:null, email:'', name:'', scans:[], resendAt:0, tid:null, sent:false };
+const pending = { followup:null, acc:null, raw:null, key:null, email:'', name:'', scans:[], resendAt:0, tid:null, sent:false };
 
 function loginStep(stage){            // 'password' | 'code'
   const code = stage === 'code';
@@ -354,6 +374,8 @@ function loginStep(stage){            // 'password' | 'code'
   if(code) setTimeout(()=>$('lgCode').focus(), 40);
 }
 function clearPending(){
+  authEpoch++;
+  pending.followup = null;
   clearInterval(pending.tid); pending.tid = null;
   pending.acc = pending.raw = pending.key = null;
   pending.email = ''; pending.name = ''; pending.scans = []; pending.sent = false;
@@ -391,24 +413,29 @@ $('btnLogin').onclick = async () => {
   const who = $('loginId').value.trim(), pw = $('loginPw').value;
   $('ok-login').hidden = true;
   if(!who || !pw) return fail('login','아이디와 비밀번호를 입력해 주세요.');
+  const epoch = authEpoch;
   const at = attempts();
   if(at.until > Date.now())
     return fail('login', `로그인 시도가 너무 많습니다. ${Math.ceil((at.until-Date.now())/1000)}초 뒤에 다시 시도하세요.`);
 
   $('btnLogin').disabled = true; $('btnLogin').textContent = '확인 중…';
   try{
-    const acc = who.includes('@') ? await accounts.byEmail(who) : accounts.byId(who);
+    const acc = !LOCAL_AUTH && who.includes('@') ? await accounts.byEmail(who) : accounts.byId(who);
     if(!acc) throw new Error('mismatch');
+    const snapshot = JSON.stringify(acc);
     const {raw, key} = await unlockWithPw(acc, pw);       // 비밀번호가 틀리면 예외
     const data = await unseal(key, acc.data);
+    if(epoch !== authEpoch) return;
+    if(JSON.stringify(accounts.byId(acc.id)) !== snapshot) throw new Error('changed');
     ls.del(LKEY);
+    pending.followup = data.followup || null;
 
     // 비밀번호는 맞았습니다. 아직 들여보내지 않고 이메일 인증을 한 번 더 받습니다.
     pending.acc = acc; pending.raw = raw; pending.key = key;
     pending.email = data.email || ''; pending.scans = data.scans || []; pending.name = data.name || '';
     $('loginPw').value = '';
 
-    if(!pending.email){                                   // 예전 계정이라 이메일이 없으면 통과
+    if(LOCAL_AUTH || !pending.email){                                   // 예전 계정이라 이메일이 없으면 통과
       finishLogin(); return;
     }
     await AuthBackend.detect();
@@ -416,7 +443,8 @@ $('btnLogin').onclick = async () => {
     $('lgTimer').textContent = `${acc.emailMask} 으로 인증번호를 보내는 중…`;
     if(!(await sendLoginCode())) clearPending();
   }catch(err){
-    const n = at.n + 1;
+    if(epoch !== authEpoch) return;
+    const n = Math.min(30, at.n + 1);
     ls.set(LKEY, {n, until: n >= 5 ? Date.now() + Math.min(300, Math.pow(2, n-4)*15)*1000 : 0});
     fail('login', '아이디 또는 비밀번호가 맞지 않습니다.' + (n>=5 ? ' 잠시 후 다시 시도해 주세요.' : ''));
   }finally{
@@ -425,10 +453,14 @@ $('btnLogin').onclick = async () => {
 };
 
 function finishLogin(){
+  if(!pending.acc || !pending.key) return;
+  S.followup = typeof FU !== 'undefined' ? FU.clean(pending.followup) : pending.followup;
+  pending.followup = null;
   S.acc = pending.acc; S.masterRaw = pending.raw; S.masterKey = pending.key;
   S.email = pending.email; S.name = pending.name || ''; S.scans = pending.scans; S.guest = false;
   clearInterval(pending.tid); pending.tid = null;
   pending.acc = pending.raw = pending.key = null; pending.scans = [];
+  pending.email = ''; pending.name = ''; pending.sent = false;
   $('lgCode').value = ''; $('lgBox').hidden = true;
   $('loginId').disabled = false; $('loginPw').disabled = false; $('btnLogin').hidden = false;
   enterApp();
@@ -450,15 +482,14 @@ $('lgCheck').onclick = async () => {
   }catch(e){ $('lgCheck').disabled = false; fail('login', e.message); }
 };
 ['loginId','loginPw'].forEach(id => $(id).addEventListener('keydown', e=>{ if(e.key==='Enter') $('btnLogin').click(); }));
-$('goGuest').onclick = () => enterGuest('analyze');
 
 /* ── 아이디 찾기 ── */
-$('goFindId').onclick = () => { $('fiEmail').value=''; vFindId.reset(); show('findid'); };
+$('goFindId').onclick = () => { if(LOCAL_AUTH){ alert('아이디는 이 기기에만 보관됩니다. 가입할 때 저장한 복구 키 파일에서 아이디를 확인해 주세요.'); return; } $('fiEmail').value=''; vFindId.reset(); show('findid'); };
 $('fi2login').onclick = () => show('login');
 $('btnIdDone').onclick = () => { $('loginId').value=''; show('login'); };
 
 /* ── 비밀번호 찾기 ── */
-$('goFindPw').onclick = () => { $('fpId').value=''; $('fpEmail').value=''; vFindPw.reset(); show('findpw'); };
+$('goFindPw').onclick = () => { if(LOCAL_AUTH){ const id = $('loginId').value.trim(); const acc=accounts.byId(id); if(!acc) return fail('login','복구할 계정의 아이디를 먼저 입력해 주세요.'); flow.acc=acc; flow.id=acc.id; flow.email=''; $('npPw').value=''; $('npPw2').value=''; $('npRec').value=''; show('newpw'); return; } $('fpId').value=''; $('fpEmail').value=''; vFindPw.reset(); show('findpw'); };
 $('fp2login').onclick = () => show('login');
 $('np2login').onclick = () => show('login');
 $('btnNewPw').onclick = async () => {
@@ -466,6 +497,8 @@ $('btnNewPw').onclick = async () => {
   if(!pwValid(pw)) return fail('newpw','비밀번호에 ' + pwMissing(pw).join(', ') + ' 조건이 빠졌습니다.');
   if(pw !== pw2)   return fail('newpw','두 비밀번호가 서로 다릅니다.');
   const acc = flow.acc;
+  const expected = JSON.stringify(acc);
+  const epoch = authEpoch;
   $('btnNewPw').disabled = true;
   try{
     let masterRaw = null, keptRecords = false;
@@ -475,6 +508,7 @@ $('btnNewPw').onclick = async () => {
         masterRaw = u.raw; keptRecords = true;
       }catch(e){ return fail('newpw','복구 키가 맞지 않습니다. 다시 확인하거나 비워 두고 진행하세요.'); }
     }
+    if(!masterRaw && LOCAL_AUTH) return fail('newpw','기기 전용 계정은 복구 키가 있어야 비밀번호를 바꿀 수 있습니다.');
     if(!masterRaw){
       if(!confirm('복구 키 없이 진행하면 저장된 회차 기록이 모두 삭제됩니다.\n계속할까요?')) return;
       masterRaw = crypto.getRandomValues(new Uint8Array(32));
@@ -482,8 +516,12 @@ $('btnNewPw').onclick = async () => {
       acc.data = await seal(mKey, {email: flow.email, scans: []});
       await rewrapRecovery(acc, masterRaw);     // 마스터가 바뀌었으므로 복구 키도 새로 발급
     }
-    await rewrapPassword(acc, masterRaw, pw);
-    accounts.put(acc);
+    const updated = {...acc};
+    await rewrapPassword(updated, masterRaw, pw);
+    if(epoch !== authEpoch) return;
+    const result = await accounts.commit(updated, expected, () => epoch === authEpoch);
+    if(result.cancelled) return;
+    if(!result.ok) return fail('newpw',result.conflict ? '다른 탭에서 계정이 변경됐습니다. 다시 로그인해 주세요.' : '저장하지 못했습니다. 비밀번호는 변경되지 않았습니다.');
     ls.del(LKEY);
     show('login');
     $('loginId').value = acc.id;
@@ -496,17 +534,40 @@ $('btnNewPw').onclick = async () => {
 };
 
 /* ── 비밀번호 변경(로그인 상태) ── */
-$('cp2app').onclick = () => { $('gate').hidden = true; $('app').hidden = false; };
+$('cp2app').onclick = () => { authEpoch++; clearAuthSecrets(); $('gate').hidden = true; $('app').hidden = false; };
 $('btnChPw').onclick = async () => {
   const oldPw = $('cpOld').value, np = $('cpNew').value, np2 = $('cpNew2').value;
   if(!pwValid(np)) return fail('chpw','비밀번호에 ' + pwMissing(np).join(', ') + ' 조건이 빠졌습니다.');
   if(np !== np2)   return fail('chpw','두 비밀번호가 서로 다릅니다.');
   try{
-    const u = await unlockWithPw(S.acc, oldPw);
-    await rewrapPassword(S.acc, u.raw, np);
-    accounts.put(S.acc);
+    const original = S.acc, key = S.masterKey;
+    const epoch = authEpoch;
+    const expected = JSON.stringify(original);
+    const u = await unlockWithPw(original, oldPw);
+    if(epoch !== authEpoch || S.acc !== original || S.masterKey !== key) return;
+    const updated = {...original};
+    await rewrapPassword(updated, u.raw, np);
+    if(epoch !== authEpoch || S.acc !== original || S.masterKey !== key) return;
+    const result = await accounts.commit(updated, expected, () => epoch === authEpoch && S.acc === original && S.masterKey === key);
+    if(result.cancelled) return;
+    if(!result.ok) return fail('chpw',result.conflict ? '다른 탭에서 계정이 변경됐습니다. 다시 로그인해 주세요.' : '저장 공간을 확인해 주세요. 비밀번호는 변경되지 않았습니다.');
+    S.acc = updated;
     $('cpOld').value = $('cpNew').value = $('cpNew2').value = '';
     $('gate').hidden = true; $('app').hidden = false;
     alert('비밀번호를 변경했습니다. 복구 키는 그대로 사용할 수 있습니다.');
   }catch(e){ fail('chpw','현재 비밀번호가 맞지 않습니다.'); }
 };
+
+// 로컬 계정은 이메일/인증번호를 수집하거나 표시하지 않습니다.
+if(LOCAL_AUTH){
+  for(const id of ['suEmail','suSend','suBox','suOk','suDemo','lgBox','lgDemo','goFindId']){
+    const el=$(id); if(el) el.hidden=true;
+  }
+  const emailField=$('suEmail').closest('.field'); if(emailField) emailField.hidden=true;
+  const intro=$('scr-signup').querySelector('.lede');
+  if(intro) intro.textContent='이 기기에서 사용할 아이디와 비밀번호를 정해 주세요. 이메일은 수집하지 않습니다.';
+  $('suIdHelp').textContent='이 브라우저에서 사용할 아이디입니다.';
+  const label=document.querySelector('label[for="npRec"]'); if(label) label.textContent='복구 키 (필수)';
+  const help=$('npRecField').querySelector('.help'); if(help) help.textContent='복구 키가 없으면 암호화 기록을 열거나 비밀번호를 재설정할 수 없습니다.';
+  const loginIntro=$('scr-login').querySelector('.lede'); if(loginIntro) loginIntro.textContent='아이디와 비밀번호로 이 브라우저에 보관한 암호화 기록을 엽니다.';
+}

@@ -294,7 +294,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('  뇌 MRI 읽어주기');
   console.log('  ───────────────────────────────────────────');
   console.log(`  주소   http://localhost:${PORT}   ← Ctrl+클릭 하면 열립니다`);
-  console.log(`  메일   ${mailReady ? '켜짐 — 실제 인증번호가 메일로 갑니다' : '꺼짐 — 지금은 인증번호가 화면에 표시되는 데모 모드입니다'}`);
+  console.log(`  메일   ${mailReady ? '켜짐 — 실제 인증번호가 메일로 갑니다' : '꺼짐 — 이메일 없이 이 기기 전용 로그인'}`);
   console.log('  종료   Ctrl + C');
   openBrowser(`http://localhost:${PORT}`);
   if(!mailReady){

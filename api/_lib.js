@@ -122,10 +122,10 @@ async function sendViaGmail(to, {subject, html, text}){
       ? { host: process.env.SMTP_HOST,
           port: Number(process.env.SMTP_PORT) || 587,
           secure: String(process.env.SMTP_SECURE || '') === 'true',
-          auth: { user, pass },
-          ...(process.env.SMTP_INSECURE === 'true'
-                ? { ignoreTLS: true, tls: { rejectUnauthorized: false } } : {}) }
-      : { service: 'gmail', auth: { user, pass } }
+          requireTLS: true,
+          disableFileAccess: true, disableUrlAccess: true,
+          auth: { user, pass } }
+      : { service: 'gmail', requireTLS: true, disableFileAccess: true, disableUrlAccess: true, auth: { user, pass } }
   );
   try{
     await transport.sendMail({ from: `뇌 MRI 읽어주기 <${user}>`, to, subject, html, text });

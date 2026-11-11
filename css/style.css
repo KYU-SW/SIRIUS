@@ -482,3 +482,131 @@ footer.sitefoot b{color:var(--ink-2)}
   .shell{grid-template-columns:1fr}
   .card{box-shadow:none; border-color:#ccc; break-inside:avoid}
 }
+
+/* ═══════════ 시야 기록 ═══════════ */
+.linkbtn{border:0; background:none; padding:0; color:var(--brand); font:inherit; text-decoration:underline; cursor:pointer}
+.feature small{font-weight:500; color:var(--ink-3); font-size:.75em}
+.vf-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:16px}
+.vf-panel{margin-top:16px; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2)}
+.vf-level{display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius:12px; border:1px solid var(--line-2); border-left-width:6px; background:var(--surface-2)}
+.vf-lvmark{flex:none; font-weight:700; font-size:calc(13px * var(--fs)); padding:3px 9px; border-radius:999px; background:var(--surface-3); white-space:nowrap}
+.vf-lv0{border-left-color:var(--good)}
+.vf-lv1{border-left-color:var(--spread)}
+.vf-lv2{border-left-color:var(--spread); background:color-mix(in srgb, var(--spread) 10%, var(--surface-2))}
+.vf-lv3,.vf-lv4{border-left-color:var(--bad); background:color-mix(in srgb, var(--bad) 9%, var(--surface-2))}
+.vf-lv4 .vf-lvmark{background:var(--bad); color:#fff}
+.vf-eyes{margin:12px 0 0; padding-left:18px; font-size:calc(13.4px * var(--fs))}
+.vf-eyes li{margin:4px 0}
+.vf-charts{display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:18px}
+.vf-chart{display:flex; flex-direction:column; gap:6px; color:var(--ink)}
+.vf-chart svg{width:100%; height:auto; max-width:420px}
+.vf-chart.empty{padding:14px; border:1px dashed var(--line-2); border-radius:10px}
+.vf-map{width:100%; max-width:560px; height:auto; color:var(--ink); display:block; margin-bottom:8px}
+.vf-check{display:flex; gap:10px; align-items:flex-start; padding:7px 0; font-weight:400 !important; font-size:calc(13.6px * var(--fs)); cursor:pointer}
+.vf-check input{margin-top:5px; flex:none; width:auto !important}
+.vf-tag{display:inline-block; font-size:.78em; padding:1px 7px; border-radius:999px; background:var(--bad); color:#fff; vertical-align:1px}
+.vf-card-rect{border:2px solid var(--brand); border-radius:10px; background:var(--brand-soft); margin:8px 0; max-width:100%}
+#vfCardW{width:100%; max-width:520px; accent-color:var(--brand)}
+.vf-rules{display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px 18px; margin:14px 0}
+.vf-rule{display:flex; justify-content:space-between; align-items:center; gap:12px; font-size:calc(13px * var(--fs))}
+.vf-rule input{width:72px; padding:6px 8px; border:1px solid var(--line-2); border-radius:8px; background:var(--surface-2)}
+.vf-sum-maps{display:flex; gap:18px; flex-wrap:wrap; margin:14px 0}
+.vf-sum-map{flex:1 1 300px; min-width:260px}
+.vf-sub{margin:2px 0 2px 16px !important; color:var(--ink-2)}
+#vfStage{position:fixed; inset:0; z-index:1000; background:#000; touch-action:none; user-select:none; cursor:none}
+#vfStage canvas{position:absolute; inset:0; display:block}
+#vfHud{position:absolute; top:10px; right:12px; display:flex; gap:12px; align-items:center; color:#5f6872; font-size:12px; cursor:default}
+#vfHud .btn{opacity:.55; background:#111; color:#9aa4b0; border-color:#2a323b}
+#vfHud .btn:hover,#vfHud .btn:focus-visible{opacity:1}
+.vf-cover{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(8,11,15,.94); color:#e6edf5; padding:20px; cursor:default}
+.vf-cover-in{max-width:560px}
+.vf-cover-in h3{margin-bottom:12px}
+.vf-cover-in ul{padding-left:20px; line-height:1.8}
+.vf-cover-in .btn{margin:14px 10px 0 0}
+@media (prefers-reduced-motion: reduce){ .vf-level{transition:none} }
+@media print{
+  html.vf-printing body *{visibility:hidden}
+  html.vf-printing #vfPrintArea, html.vf-printing #vfPrintArea *{visibility:visible}
+  html.vf-printing #vfPrintArea{position:absolute; left:0; top:0; width:100%; padding:16px; background:#fff; color:#000}
+  html.vf-printing #vfPrintArea svg{max-width:46%}
+}
+
+/* ═══════════ 경과 관찰 ═══════════ */
+.fu-119{margin:0 0 14px; padding:12px 14px; border:1px solid var(--bad); border-left-width:6px; border-radius:12px; background:color-mix(in srgb, var(--bad) 9%, var(--surface-2)); font-size:calc(13.4px * var(--fs))}
+.fu-h4{margin:18px 0 8px; font-size:calc(14.5px * var(--fs))}
+.fu-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:4px 18px}
+.fu-grid3{grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); align-items:end}
+.fu-btnrow{display:flex; align-items:flex-end}
+.fu-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%}
+.fu-scroll table.rec{min-width:560px; width:100%}
+.fu-scroll table.rec.fu-narrow{min-width:260px}
+.fu-scroll th,.fu-scroll td{white-space:nowrap; vertical-align:top}
+.fu-hist td:nth-child(3){white-space:normal; min-width:240px}
+.fu-actions{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:14px}
+.fu-list{list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:8px}
+.fu-list>li{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2)}
+.fu-list-solo{margin-top:14px}
+.fu-more{margin-top:12px}
+.fu-more summary{cursor:pointer; font-weight:600}
+.fu-chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:6px}
+.fu-eye{display:inline-flex; gap:6px; align-items:center; font-size:calc(12.5px * var(--fs))}
+.fu-chip{display:inline-block; font-size:calc(12px * var(--fs)); padding:2px 9px; border-radius:999px; background:var(--surface-3); border:1px solid var(--line-2); white-space:nowrap}
+.fu-chg{border-color:var(--spread); background:color-mix(in srgb, var(--spread) 14%, var(--surface-2)); font-weight:600}
+.fu-same{border-color:var(--good)}
+.fu-rec{font-size:.75em; padding:1px 7px; border-radius:999px; background:var(--brand-soft); color:var(--brand); vertical-align:1px}
+.fu-bad{color:var(--bad)}
+.fu-steps{padding-left:20px; line-height:1.8}
+.fu-fs{border:1px solid var(--line); border-radius:12px; padding:10px 14px 12px; margin:12px 0}
+.fu-fs legend{padding:0 6px; font-weight:600}
+.fu-fs-em{border-color:var(--bad)}
+.fu-check,.fu-radio{display:flex; gap:10px; align-items:flex-start; padding:7px 0; font-weight:400; cursor:pointer; font-size:calc(13.6px * var(--fs))}
+.fu-check input,.fu-radio input{margin-top:5px; flex:none; width:auto}
+.fu-radio{display:inline-flex; margin-right:16px}
+.fu-em span{font-weight:600}
+.fu-ask{display:inline-flex; gap:6px; flex-wrap:wrap; align-items:center; font-size:calc(12.5px * var(--fs))}
+.fu-confirm{padding:14px; border:2px solid var(--spread); border-radius:12px; background:color-mix(in srgb, var(--spread) 8%, var(--surface-2))}
+.fu-cross{margin:0 0 14px; padding:12px 14px; border:1px solid var(--spread); border-left-width:6px; border-radius:12px; background:color-mix(in srgb, var(--spread) 9%, var(--surface-2)); font-size:calc(13.4px * var(--fs))}
+.fu-figs{display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:18px}
+.fu-fig{margin:0; color:var(--ink)}
+.fu-fig svg{width:100%; height:auto; display:block}
+.fu-grid-l{stroke:var(--line-2); stroke-width:1}
+.fu-axis{stroke:var(--ink-3); stroke-width:1.2}
+.fu-tick,.fu-unit{fill:var(--ink-2); font-size:11px}
+.fu-pt{stroke-width:1.5}
+.fu-s0{fill:var(--brand); stroke:var(--brand)}
+.fu-s1{fill:var(--spread); stroke:var(--spread)}
+.fu-s2{fill:var(--neutral); stroke:var(--neutral)}
+.fu-hollow{fill:none !important}
+.fu-s0t{color:var(--brand)} .fu-s1t{color:var(--spread)} .fu-s2t{color:var(--neutral)}
+.fu-legend{display:flex; gap:12px; flex-wrap:wrap}
+.fu-q li{margin:4px 0}
+
+/* 검사 무대 */
+#fuStage{position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; background:#0A0E13; color:#E6EDF5; padding:16px}
+#fuStage[hidden]{display:none}
+.fu-stage-in{width:min(560px, 100%); text-align:center; display:flex; flex-direction:column; align-items:center; gap:14px}
+.fu-count{font-size:44px; font-weight:700; min-height:56px; font-family:var(--f-mono)}
+.fu-pad{width:min(420px, 90vw); height:min(40vh, 280px); border:3px dashed #5B8DF7; border-radius:20px; background:#121A24; color:#E6EDF5; font-size:22px; touch-action:manipulation; cursor:pointer}
+.fu-pad:active{background:#1B2F4C}
+.fu-field{position:relative; width:min(88vw, 62vh); aspect-ratio:1; background:#05070A; border:1px solid #232C36; touch-action:manipulation}
+.fu-fix{position:absolute; left:50%; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%; background:#E6EDF5}
+.fu-stim{position:absolute; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%; background:#9FB3C8; display:none}
+.fu-field[data-stim="u"] .fu-stim{display:block; left:50%; top:12%}
+.fu-field[data-stim="d"] .fu-stim{display:block; left:50%; top:88%}
+.fu-field[data-stim="l"] .fu-stim{display:block; left:12%; top:50%}
+.fu-field[data-stim="r"] .fu-stim{display:block; left:88%; top:50%}
+@media (max-width:620px){ .fu-list>li{flex-direction:column; align-items:flex-start} .fu-figs{grid-template-columns:1fr} }
+.fu-print-only{display:none}
+@media print{
+  html.fu-printing body *{visibility:hidden}
+  html.fu-printing #fuPrintCompact, html.fu-printing #fuPrintCompact *{visibility:visible}
+  html.fu-printing .fu-screen{display:none !important}
+  html.fu-printing #fuPrintCompact{display:block; position:absolute; left:0; top:0; width:100%; padding:10mm; background:#fff; color:#000; font-size:10.5pt; line-height:1.4}
+  html.fu-printing #fuPrintCompact h3{font-size:14pt; margin:0 0 6px}
+  html.fu-printing #fuPrintCompact h3 small{font-weight:400; font-size:9pt}
+  html.fu-printing #fuPrintCompact p,html.fu-printing #fuPrintCompact ol{margin:4px 0}
+  html.fu-printing #fuPrintCompact table{width:100%; border-collapse:collapse; font-size:9.5pt}
+  html.fu-printing #fuPrintCompact th,html.fu-printing #fuPrintCompact td{border:1px solid #888; padding:2px 5px; text-align:left}
+  html.fu-printing #fuPrintCompact .fu-safe{border:1px solid #000; padding:5px 7px; margin-top:8px}
+  html.fu-printing #fuStage{display:none}
+}
