@@ -6,7 +6,10 @@
            고정 손실·거짓 양성·거짓 음성 점검). 녹내장 자동시야계에서 쓰는 방식을 따릅니다.
    · 해석: 정상인 평균과 비교하지 않고 "내 기준선"과만 비교합니다.
            화면·밝기·거리가 보정되지 않은 장치이므로 절대값이 아니라 변화만 의미가 있습니다.
-   · 수막종용: 중심 10° 변화, 코쪽/귀쪽(수직 중앙선) 비대칭, 양안 바깥쪽 저하 패턴을 봅니다.
+   · 수막종용: 중심 10° 변화, 코쪽/귀쪽(수직 중앙선) 비대칭(좌우 짝으로 계산), 양안 바깥쪽 저하,
+           안장결절 위치의 집중 구역(vf-map.js) 변화를 봅니다.
+   · 화면의 숫자는 '앱 점수'(0~30, 클수록 잘 보임)입니다. 내부 계산 단위는 이 장치 기준의 상대 dB 입니다.
+   · 기록마다 검사 지도(mapId·점 목록)를 저장하고, 같은 mapId 기록끼리만 기준선과 비교합니다.
    · 입력은 숫자·고정 목록뿐입니다. 자유 입력 글자는 받지 않습니다.
    ═══════════════════════════════════════════════════════════ */
 const VF = (() => {
@@ -14,20 +17,26 @@ const VF = (() => {
   const BG_LIN = 0.10;                     // 배경의 선형 휘도 (0~1)
   const STIM = Object.freeze({ sizeDeg:0.43, durMs:200, windowMs:1100, minRtMs:100 });
   const CARD_MM = 85.6;                    // 신용카드 가로 길이(ISO/IEC 7810 ID-1) — 화면 보정용
-  const BLIND = Object.freeze({ x:15, y:-1.5, exclude:5 });   // 맹점: 귀쪽 15°, 아래 1.5°
+  const BLIND = Object.freeze({ x:VFMap.BLIND.tx, y:VFMap.BLIND.y, exclude:VFMap.BLIND.r });   // 맹점: 귀쪽 15°, 아래 1.5°
+  const UNIT = '앱 점수';
 
   /* 의료진과 정할 수 있는 판정 기준 (임상 검증 전 시험용 기본값) */
   const RULES_DEFAULT = Object.freeze({
-    pointDrop:6,           // 한 점이 기준선보다 이 dB 이상 떨어지면 '나빠진 점'
+    pointDrop:6,           // 한 점이 기준선보다 이 앱 점수 이상 떨어지면 '나빠진 점'
     clusterMin:3,          // 서로 붙은 나빠진 점이 이 개수 이상이면 '의미 있는 변화'
-    centralDrop:3,         // 중심 10° 평균이 이 dB 이상 떨어지면 변화
-    tnDrop:3,              // 귀쪽 평균 − 코쪽 평균이 이 dB 이상 더 벌어지면 변화
-    urgentCentralDrop:10,  // 중심 평균이 이 dB 이상 떨어지면 '큰 변화'
-    urgentCluster:6        // 나빠진 점이 이 개수 이상 붙어 있으면 '큰 변화'
+    centralDrop:3,         // 중심 10° 평균이 이 앱 점수 이상 떨어지면 변화
+    tnDrop:3,              // 귀쪽 − 코쪽(좌우 짝 평균)이 이 앱 점수 이상 더 벌어지면 변화
+    urgentCentralDrop:10,  // 중심 평균이 이 앱 점수 이상 떨어지면 '큰 변화'
+    urgentCluster:6,       // 나빠진 점이 이 개수 이상 붙어 있으면 '큰 변화'
+    focusDrop:6,           // (임시) 집중 구역의 한 점이 기준선보다 이 앱 점수 이상 낮으면
+    focusMin:2             // (임시) … 그런 집중 점이 이 개수 이상이면 변화 사유
   });
   const RULE_LIMITS = Object.freeze({
-    pointDrop:[3,15], clusterMin:2, centralDrop:[1,10], tnDrop:[1,10], urgentCentralDrop:[4,25], urgentCluster:[3,30]
+    pointDrop:[3,15], clusterMin:2, centralDrop:[1,10], tnDrop:[1,10], urgentCentralDrop:[4,25], urgentCluster:[3,30],
+    focusDrop:[3,15], focusMin:[1,3]
   });
+  /* 신뢰도 기준 */
+  const REL = Object.freeze({ fp:0.15, fl:0.33, fn:0.33, stray:0.15, strayMinTrials:20 });
   function sanitizeRules(r){
     const out = {};
     for(const k of Object.keys(RULES_DEFAULT)){
@@ -39,29 +48,15 @@ const VF = (() => {
   }
 
   /* ── 1. 검사 위치 ─────────────────────────────────────── */
-  /* 좌표: 환자가 보는 방향 기준 (x>0 오른쪽, y>0 위쪽), 단위 도(°).
-     중심 12° 안쪽 16점(6° 간격) + 바깥 ±15°·±21° 16점. 맹점 근처 점은 눈마다 뺍니다. */
-  const XS_C = [-9,-3,3,9], YS = [-9,-3,3,9], XS_P = [-21,-15,15,21];
-  const sideSign = eye => eye === 'R' ? 1 : -1;            // 오른눈의 귀쪽은 화면 오른쪽
-  const blindCenter = eye => ({ x: BLIND.x * sideSign(eye), y: BLIND.y });
-  const GRIDS = {};
-  function grid(eye){
-    if(eye !== 'R' && eye !== 'L') throw new Error('eye');
-    if(GRIDS[eye]) return GRIDS[eye];
-    const b = blindCenter(eye), pts = [];
-    for(const x of [...XS_P.filter(v => v < 0), ...XS_C, ...XS_P.filter(v => v > 0)]){
-      for(const y of YS){
-        if(Math.hypot(x - b.x, y - b.y) < BLIND.exclude) continue;
-        pts.push(Object.freeze({
-          id: x + ',' + y, x, y,
-          central: Math.hypot(x, y) <= 10,
-          temporal: x * sideSign(eye) > 0,
-          upper: y > 0
-        }));
-      }
-    }
-    return (GRIDS[eye] = Object.freeze(pts));
-  }
+  /* 좌표: 환자가 보는 방향 기준 (x>0 오른쪽, y>0 위쪽), 단위 도(°). 지도는 vf-map.js 가 만듭니다.
+     grid(eye) 는 예전 30점 지도(legacy-30)이며 예전 기록과의 호환용으로만 남깁니다. */
+  const YS = [-9,-3,3,9], XS_P = [-21,-15,15,21];
+  const blindCenter = VFMap.blindCenter;
+  const grid = eye => VFMap.legacy(eye).points;
+  const LEGACY = 'legacy-30';
+  /* 기록 → 지도. mapId 가 없는 예전 기록은 legacy-30 */
+  const mapOf = t => VFMap.mapById(t && t.mapId ? t.mapId : LEGACY, t.eye);
+  const pointsOf = t => mapOf(t).points;
 
   /* ── 2. 화면 기하·밝기 ────────────────────────────────── */
   const degToMm = (deg, distMm) => distMm * Math.tan(deg * Math.PI / 180);
@@ -109,8 +104,10 @@ const VF = (() => {
   }
   const evenClamp = v => Math.min(28, Math.max(4, 2 * Math.round(v / 2)));
 
-  function createTest({ eye, rng = Math.random, startDb = 26 } = {}){
-    const states = grid(eye).map(newPoint);
+  function createTest({ eye, map = null, rng = Math.random, startDb = 26 } = {}){
+    const pts = map ? map.points : grid(eye);
+    if(map && map.eye !== eye) throw new Error('eye');
+    const states = pts.map(newPoint);
     const rel = { fp:0, fpN:0, fl:0, flN:0, fn:0, fnN:0 };
     const fnQueue = [];
     let pending = null, last = null, trials = 0, fnPlanned = 0;
@@ -164,45 +161,72 @@ const VF = (() => {
     const finished = () => !pending && states.every(s => s.done) && !fnQueue.length;
     function result(){
       const th = states.map(s => s.done ? s.thr : null);
-      return {
+      const out = {
         eye,
         th,
         un: states.map((s, i) => s.unseen ? i : -1).filter(i => i >= 0),
-        rel: { ...rel }
+        rel: { ...rel, tr:trials }
       };
+      if(map){ out.mapId = map.mapId; out.pts = VFMap.ptsOf(map); }
+      return out;
     }
     const discard = () => { pending = null; };      // 화면을 벗어나 판단할 수 없는 시행은 기록하지 않고 버립니다
     return { next, answer, discard, progress, finished, result, get pending(){ return pending; } };
   }
 
-  /* 신뢰도: 거짓 양성 >20%, 고정 손실 >33%, 거짓 음성 >33% 이면 신뢰하기 어려움 (시행 수가 충분할 때만) */
+  /* 신뢰도: 거짓 양성 >15%, 고정 손실 >33%, 거짓 음성 >33% 이면 신뢰하기 어려움 (시행 수가 충분할 때만).
+     과다 stray(빛이 없을 때·반응 시간 밖에서 누른 횟수)가 전체 시행의 15%를 넘어도(시행 20회 이상) 신뢰하기 어려움.
+     st·tr 가 없는 예전 기록은 stray 기준을 적용하지 않습니다. */
   function isReliable(r){
     const bad = (n, d, min, lim) => d >= min && n / d > lim;
-    return !(bad(r.fp, r.fpN, 4, 0.20) || bad(r.fl, r.flN, 4, 0.33) || bad(r.fn, r.fnN, 3, 0.33));
+    const stray = Number.isInteger(r.st) && Number.isInteger(r.tr) && bad(r.st, r.tr, REL.strayMinTrials, REL.stray);
+    return !(bad(r.fp, r.fpN, 4, REL.fp) || bad(r.fl, r.flN, 4, REL.fl) || bad(r.fn, r.fnN, 3, REL.fn) || stray);
+  }
+  /* 신뢰도 낮음의 이유(화면 안내용 코드) */
+  function relProblems(r){
+    const bad = (n, d, min, lim) => d >= min && n / d > lim;
+    const out = [];
+    if(bad(r.fp, r.fpN, 4, REL.fp)) out.push('fp');
+    if(bad(r.fl, r.flN, 4, REL.fl)) out.push('fl');
+    if(bad(r.fn, r.fnN, 3, REL.fn)) out.push('fn');
+    if(Number.isInteger(r.st) && Number.isInteger(r.tr) && bad(r.st, r.tr, REL.strayMinTrials, REL.stray)) out.push('stray');
+    return out;
   }
   const pct = (n, d) => d ? Math.round(100 * n / d) : null;
 
   /* ── 4. 통계 ──────────────────────────────────────────── */
   const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   const r1 = v => v == null ? null : Math.round(v * 10) / 10;
-  /* th: 검사 한 번의 dB 배열(격자 순서) */
-  function stats(eye, th){
-    const g = grid(eye);
+  /* 짝 목록: [귀쪽 점 번호, 코쪽 점 번호] */
+  function pairIdx(g){
+    const by = new Map();
+    g.forEach((p, i) => { if(p.pair == null) return; const e = by.get(p.pair) || {}; e[p.temporal ? 't' : 'n'] = i; by.set(p.pair, e); });
+    return [...by.values()].filter(e => e.t != null && e.n != null).map(e => [e.t, e.n]);
+  }
+  /* th: 검사 한 번의 값 배열(지도 순서). pts 를 주지 않으면 예전 30점 지도 */
+  function stats(eye, th, pts){
+    const g = pts || grid(eye);
     const pick = f => mean(g.map((p, i) => f(p) ? th[i] : null).filter(v => v != null));
+    const pairs = pairIdx(g);
     return {
       ms: pick(() => true),
       central: pick(p => p.central),
       periph: pick(p => !p.central),
       temporal: pick(p => p.temporal),
       nasal: pick(p => !p.temporal),
+      tn: mean(pairs.map(([t, n]) => th[t] - th[n])),            // 귀쪽 − 코쪽 (좌우 짝 평균)
+      nPairs: pairs.length,
+      focus: pick(p => p.zone),                                   // 집중 구역 3점 평균 (없으면 null)
+      focusMirror: pick(p => p.role === 'focus' && !p.zone),       // 집중 구역의 −x 짝 평균
       supTemporal: pick(p => p.temporal && p.upper),
       unseen: 0
     };
   }
+  const statsOf = t => stats(t.eye, t.th, pointsOf(t));
 
   /* ── 5. 변화 분석 ─────────────────────────────────────── */
-  function clusterSize(eye, idxs){
-    const g = grid(eye), set = new Set(idxs); let best = 0;
+  function clusterSize(eye, idxs, pts){
+    const g = pts || grid(eye), set = new Set(idxs); let best = 0;
     const seen = new Set();
     for(const i of idxs){
       if(seen.has(i)) continue;
@@ -230,40 +254,62 @@ const VF = (() => {
   }
   const dayNum = d => Math.floor(Date.parse(d + 'T00:00:00Z') / 86400000);
 
+  /* 이 눈에서 비교에 쓸 지도: 가장 최근 기록의 지도 (기록이 없으면 legacy-30) */
+  function currentMapId(eye, tests){
+    const mine = (tests || []).filter(t => t.eye === eye);
+    return mine.length ? (mine[mine.length - 1].mapId || LEGACY) : LEGACY;
+  }
+  /* 비교 구간: 이 눈의 기록 중 끝에서부터 같은 mapId 가 이어진 기록들.
+     지도가 바뀌면(예전 지도로 돌아가도) 새 구간이 시작되어 기준선을 새로 만듭니다(1/2). */
+  function segmentOf(eye, tests){
+    const all = (tests || []).filter(t => t.eye === eye);
+    const mapId = all.length ? (all[all.length - 1].mapId || LEGACY) : LEGACY;
+    let i = all.length;
+    while(i > 0 && (all[i - 1].mapId || LEGACY) === mapId) i--;
+    return { mapId, all, seg: all.slice(i) };
+  }
   function analyzeEye(eye, tests, rulesIn){
     const rules = sanitizeRules(rulesIn);
-    const mine = tests.filter(t => t.eye === eye);
+    const { mapId, all, seg:mine } = segmentOf(eye, tests);           // 같은 지도 기록만 비교
     const rel = mine.filter(t => t.reliable);
-    const out = { eye, nTests: mine.length, nReliable: rel.length, excluded: mine.length - rel.length,
+    const map = VFMap.mapById(mapId, eye);
+    const out = { eye, mapId, mapDesc:map.desc, zone:map.zone, nTests: mine.length, nAll: all.length, otherMap: all.length - mine.length,
+                  nReliable: rel.length, excluded: mine.length - rel.length,
                   state:'none', level:0, follow:[], pattern:'none', trend:null, baseline:null, latest:null };
     if(!mine.length) return out;
     if(rel.length < 2) return { ...out, state:'baseline', need: 2 - rel.length };
-    const g = grid(eye), a = rel[0].th, b = rel[1].th;
+    const g = map.points, a = rel[0].th, b = rel[1].th;
     const base = g.map((p, i) => (a[i] + b[i]) / 2);
     const d2 = g.map((p, i) => (a[i] - b[i]) ** 2);
     const pooled = Math.sqrt(mean(d2) / 2);                  // 두 기준선 검사에서 본 점별 흔들림(SD)
+    const nCentral = g.filter(p => p.central).length || 1;
+    const bs = stats(eye, base, g);
     const pointThr = Math.min(12, Math.max(rules.pointDrop, 2 * pooled));
-    const centralThr = Math.max(rules.centralDrop, 2.5 * pooled / Math.sqrt(12));
-    const tnThr = Math.max(rules.tnDrop, 2.5 * pooled * Math.sqrt(2 / 15));
-    const bs = stats(eye, base);
-    out.baseline = { ms:r1(bs.ms), central:r1(bs.central), temporal:r1(bs.temporal), nasal:r1(bs.nasal),
+    const centralThr = Math.max(rules.centralDrop, 2.5 * pooled / Math.sqrt(nCentral));
+    const tnThr = Math.max(rules.tnDrop, 2.5 * pooled * Math.sqrt(2 / Math.max(1, bs.nPairs)));
+    const zoneIdx = g.map((p, i) => p.zone ? i : -1).filter(i => i >= 0);
+    out.baseline = { ms:r1(bs.ms), central:r1(bs.central), temporal:r1(bs.temporal), nasal:r1(bs.nasal), tn:r1(bs.tn), focus:r1(bs.focus),
                      pooledSd:r1(pooled), pointThr:r1(pointThr), dates:[rel[0].date, rel[1].date] };
 
     out.follow = rel.slice(2).map((t, k) => {
       const worse = [];
       g.forEach((p, i) => { if(base[i] >= 6 && t.th[i] - base[i] <= -pointThr) worse.push(i); });
-      const s = stats(eye, t.th);
+      const s = stats(eye, t.th, g);
       const dCentral = s.central - bs.central, dPeriph = s.periph - bs.periph;
-      const dTN = (s.temporal - bs.temporal) - (s.nasal - bs.nasal);
-      const cluster = clusterSize(eye, worse);
+      const dTN = s.tn - bs.tn;                                   // 짝으로 계산한 귀쪽−코쪽 차이의 변화
+      const dFocus = s.focus == null ? null : s.focus - bs.focus;
+      const focusWorse = zoneIdx.filter(i => t.th[i] - base[i] <= -rules.focusDrop);
+      const cluster = clusterSize(eye, worse, g);
       const reasons = [];
       if(cluster >= rules.clusterMin) reasons.push('cluster');
       if(dCentral <= -centralThr) reasons.push('central');
       if(dTN <= -tnThr) reasons.push('temporal');
+      if(zoneIdx.length && focusWorse.length >= rules.focusMin) reasons.push('focus');   // 임시 기준 (임상 검증 전)
       const severe = dCentral <= -rules.urgentCentralDrop || cluster >= rules.urgentCluster;
       return {
         pos:k + 2, date:t.date, ms:r1(s.ms), dMs:r1(s.ms - bs.ms), central:r1(s.central), dCentral:r1(dCentral),
-        dPeriph:r1(dPeriph), dTN:r1(dTN), nWorse:worse.length, cluster, worse:reasons.length > 0, reasons, severe, worseIdx:worse
+        dPeriph:r1(dPeriph), dTN:r1(dTN), focus:r1(s.focus), dFocus:r1(dFocus), nFocusWorse:focusWorse.length, focusWorseIdx:focusWorse,
+        nWorse:worse.length, cluster, worse:reasons.length > 0, reasons, severe, worseIdx:worse
       };
     });
     out.latest = out.follow[out.follow.length - 1] || null;
@@ -276,13 +322,14 @@ const VF = (() => {
       const wc = L.worseIdx.filter(i => g[i].central).length;
       if((L.reasons.includes('central') && L.dCentral <= L.dPeriph - 2) || (L.nWorse >= 3 && wc >= 0.6 * L.nWorse)) out.pattern = 'central';
       else if(L.reasons.includes('temporal')) out.pattern = 'temporal';
+      else if(L.reasons.includes('focus')) out.pattern = map.zone === 'central' ? 'central' : 'temporal';
       else out.pattern = 'diffuse';
     }
     if(rel.length >= 5){
       const d0 = dayNum(rel[0].date);
       const xs = rel.map(t => (dayNum(t.date) - d0) / 30.4);
-      const ms = slope(xs, rel.map(t => stats(eye, t.th).ms));
-      const ce = slope(xs, rel.map(t => stats(eye, t.th).central));
+      const ms = slope(xs, rel.map(t => stats(eye, t.th, g).ms));
+      const ce = slope(xs, rel.map(t => stats(eye, t.th, g).central));
       out.trend = {
         msPerMonth:r1(ms.slope), msT:r1(ms.t), centralPerMonth:r1(ce.slope), centralT:r1(ce.t),
         declining: (ms.slope <= -0.5 && ms.t <= -2) || (ce.slope <= -0.5 && ce.t <= -2)
@@ -320,6 +367,12 @@ const VF = (() => {
     { key:'emergency', label:'응급 신호가 선택되었습니다', action:'지금 바로 응급실로 가거나 119에 연락하세요. 이 앱의 검사는 하지 마세요.' }
   ]);
 
+  /* 아직 어느 눈도 기준선과 비교할 수 없을 때(검사 0회 또는 기준선 2회 수집 중) 쓰는 상태.
+     LEVEL[0](기준선과 비슷합니다)을 쓰면 비교하지 않았는데 '안정'처럼 보이므로 따로 둡니다. */
+  const PENDING = Object.freeze({ key:'pending', label:'아직 비교 전입니다',
+    action:'눈마다 같은 조건에서 기준선 검사를 2번(하루 이틀 간격) 하면 그다음 검사부터 내 기준선과 비교합니다.' });
+  const pendingInfo = n => Object.freeze({ ...PENDING, n, label:`${PENDING.label} (기준선 측정 중 ${n}/2)` });
+
   /* 전체 판정: 눈별 분석 + 가장 최근 증상 점검 */
   function assess(state, nowDay){
     const tests = state.tests || [];
@@ -332,7 +385,11 @@ const VF = (() => {
     if(R.pattern === 'temporal' && L.pattern === 'temporal' && R.level >= 1 && L.level >= 1) bitemporal = true;
     let level = Math.max(R.level, L.level, sLevel);
     if(bitemporal) level = Math.max(level, 2);   // 양쪽 눈 바깥쪽 저하는 한쪽 변화보다 중요하게 봅니다
-    return { R, L, level, bitemporal, symptomLevel:sLevel, symptomIds: symFresh ? lastSym.ids : [], info: LEVEL[level] };
+    const waiting = e => e.state === 'none' || e.state === 'baseline';
+    const pending = level === 0 && waiting(R) && waiting(L);
+    const n = Math.min(2, Math.max(R.nReliable, L.nReliable));
+    return { R, L, level, bitemporal, pending, symptomLevel:sLevel, symptomIds: symFresh ? lastSym.ids : [],
+             info: pending ? pendingInfo(n) : LEVEL[level] };
   }
 
   /* ── 7. 가져오기 검증 (신뢰하지 않는 입력을 숫자·목록으로만 다시 만든다) ── */
@@ -348,7 +405,12 @@ const VF = (() => {
     if(!Array.isArray(raw.tests) || raw.tests.length > MAX_TESTS) throw new Error('검사 수');
     const tests = raw.tests.map(t => {
       if(!t || (t.eye !== 'R' && t.eye !== 'L') || !validDate(t.date)) throw new Error('검사 항목');
-      const n = grid(t.eye).length;
+      /* 지도: mapId 가 없으면 예전 30점(legacy-30). 있으면 알려진 값이어야 하고, 점 목록은 그 지도와 정확히 같아야 합니다 */
+      const mapId = t.mapId === undefined || t.mapId === null ? LEGACY : t.mapId;
+      if(typeof mapId !== 'string' || !VFMap.MAP_IDS.includes(mapId)) throw new Error('지도');
+      const map = VFMap.mapById(mapId, t.eye);
+      if(t.pts !== undefined && t.pts !== null && !VFMap.samePts(t.pts, map)) throw new Error('지도 점');
+      const n = map.n;
       if(!Array.isArray(t.th) || t.th.length !== n || !t.th.every(v => int(v, DB_MIN, DB_MAX))) throw new Error('역치');
       const un = Array.isArray(t.un) ? t.un : [];
       if(un.length > n || !un.every(i => int(i, 0, n - 1))) throw new Error('미응답 점');
@@ -358,8 +420,12 @@ const VF = (() => {
         if(!int(r[k], 0, 1000)) throw new Error('신뢰도');
         rel[k] = r[k];
       }
+      if(r.st !== undefined || r.tr !== undefined){                      // stray·전체 시행 수 (새 기록만)
+        if(!int(r.st, 0, 5000) || !int(r.tr, 0, 5000)) throw new Error('신뢰도');
+        rel.st = r.st; rel.tr = r.tr;
+      }
       const dist = int(t.dist, 20, 80) ? t.dist : null;
-      return { date:t.date, eye:t.eye, th:t.th.slice(), un:[...new Set(un)].sort((x, y) => x - y), rel, reliable:isReliable(rel), dist };
+      return { date:t.date, eye:t.eye, mapId, pts:VFMap.ptsOf(map), th:t.th.slice(), un:[...new Set(un)].sort((x, y) => x - y), rel, reliable:isReliable(rel), dist };
     });
     const symptoms = (Array.isArray(raw.symptoms) ? raw.symptoms : []).slice(0, MAX_SYMPTOM_LOGS).map(s => {
       if(!s || !validDate(s.date) || !Array.isArray(s.ids)) throw new Error('증상 항목');
@@ -369,7 +435,7 @@ const VF = (() => {
   }
   const exportable = state => ({
     app:'sirius-vf', v:1,
-    tests: state.tests.map(t => ({ date:t.date, eye:t.eye, th:t.th, un:t.un, rel:t.rel, dist:t.dist })),
+    tests: state.tests.map(t => ({ date:t.date, eye:t.eye, mapId:t.mapId || LEGACY, pts:t.pts || VFMap.ptsOf(mapOf(t)), th:t.th, un:t.un, rel:t.rel, dist:t.dist })),
     symptoms: state.symptoms,
     rules: state.rules
   });
@@ -381,6 +447,8 @@ const VF = (() => {
     diffuse:'여러 곳에서 고르게 낮아졌습니다', none:'뚜렷한 패턴 없음'
   };
   const fmt = v => v == null ? '–' : (v > 0 ? '+' : '') + v;
+  const ZONE_KO = Object.freeze({ 'temporal-upper':'귀쪽 위', central:'중심' });
+  const focusDropLabel = L => `${UNIT} 6 이상 낮은 집중 점 ${L.nFocusWorse}/3`;
   function questions(a){
     const q = [
       '이 시야 기록의 변화가 최근 MRI 경과와 맞는지 알려 주세요.',
@@ -405,26 +473,47 @@ const VF = (() => {
     lines.push(`권장 행동: ${a.info.action}`);
     for(const eye of ['R', 'L']){
       const e = a[eye];
-      if(!e.nTests){ lines.push(`${EYE_KO[eye]}: 검사 기록 없음`); continue; }
-      if(e.state === 'baseline'){ lines.push(`${EYE_KO[eye]}: 기준선 측정 중 (신뢰할 수 있는 검사 ${e.nReliable}/2)`); continue; }
+      const tag = `${EYE_KO[eye]} [지도 ${e.mapId}]`;
+      if(!e.nAll){ lines.push(`${EYE_KO[eye]}: 검사 기록 없음`); continue; }
+      const other = e.otherMap ? ` · 다른 지도 기록 ${e.otherMap}회는 비교에서 뺐습니다` : '';
+      if(e.state === 'baseline'){ lines.push(`${tag}: 기준선 측정 중 (신뢰할 수 있는 검사 ${e.nReliable}/2)${other}`); continue; }
       const L = e.latest;
-      lines.push(`${EYE_KO[eye]}: 기준선 평균 ${e.baseline.ms} dB, 중심 10° ${e.baseline.central} dB (기준선 흔들림 SD ${e.baseline.pooledSd} dB)`);
+      lines.push(`${tag}: 기준선 평균 ${e.baseline.ms}, 중심 10° ${e.baseline.central}, 귀쪽−코쪽 ${fmt(e.baseline.tn)}${e.baseline.focus != null ? `, 집중 구역(${ZONE_KO[e.zone]}) ${e.baseline.focus}` : ''} (${UNIT}, 기준선 흔들림 SD ${e.baseline.pooledSd})${other}`);
       if(L){
-        lines.push(`  최근(${L.date}) 평균 ${L.ms} dB (${fmt(L.dMs)}), 중심 ${L.central} dB (${fmt(L.dCentral)}), 귀쪽−코쪽 차이 변화 ${fmt(L.dTN)}, 나빠진 점 ${L.nWorse}개 (붙은 최대 ${L.cluster}개)`);
+        lines.push(`  최근(${L.date}) 평균 ${L.ms} (${fmt(L.dMs)}), 중심 ${L.central} (${fmt(L.dCentral)}), 귀쪽−코쪽 차이 변화 ${fmt(L.dTN)}${L.dFocus != null ? `, 집중 구역 변화 ${fmt(L.dFocus)} (${focusDropLabel(L)})` : ''}, 나빠진 점 ${L.nWorse}개 (붙은 최대 ${L.cluster}개)`);
+        if(L.reasons.includes('focus')) lines.push(`  임시 변화 사유: 집중 구역 점 ${L.nFocusWorse}개가 기준선보다 ${UNIT} 6 이상 낮습니다 (임상 검증 전 임시 기준)`);
         if(e.pattern !== 'none') lines.push(`  양상: ${PATTERN_KO[e.pattern]}`);
       } else lines.push('  기준선 이후 검사 없음');
-      if(e.trend) lines.push(`  추세: 평균 ${fmt(e.trend.msPerMonth)} dB/월, 중심 ${fmt(e.trend.centralPerMonth)} dB/월${e.trend.declining ? ' (감소 추세)' : ''}`);
+      if(e.trend) lines.push(`  추세: 평균 ${fmt(e.trend.msPerMonth)}/월, 중심 ${fmt(e.trend.centralPerMonth)}/월 (${UNIT})${e.trend.declining ? ' (감소 추세)' : ''}`);
     }
     if(a.bitemporal) lines.push('양쪽 눈 모두 귀쪽(바깥쪽) 시야가 나빠지는 양상이 함께 보입니다.');
     if(a.symptomIds.length) lines.push('최근 증상 점검 응답: ' + a.symptomIds.map(id => SYMPTOMS.find(s => s.id === id).text).join(' / '));
-    lines.push('한계: 화면 크기·밝기·거리·고정 유지는 보정만 했을 뿐 시선 추적이 없고, 판정 기준값은 임상 검증 전 시험용입니다. 결정은 담당 의료진이 합니다.');
+    lines.push(`한계: 숫자는 이 장치 기준의 ${UNIT}(0~30)이며 병원 시야계의 dB 와 다릅니다. 화면 크기·밝기·거리·고정 유지는 보정만 했을 뿐 시선 추적이 없고, 판정 기준값은 임상 검증 전 시험용입니다. 결정은 담당 의료진이 합니다.`);
     return { assessment:a, lines, questions:questions(a) };
   }
 
+  /* 경과 관찰 화면용 요약: 눈마다 현재 지도 기준의 평균·귀쪽−코쪽·집중 구역 변화와 그래프 점 */
+  function digest(state){
+    const tests = (state && state.tests) || [];
+    const out = [];
+    for(const eye of ['R', 'L']){
+      const e = analyzeEye(eye, tests, state && state.rules);
+      if(!e.nAll) continue;
+      const pts = segmentOf(eye, tests).seg.map(t => ({ date:t.date, v:r1(statsOf(t).ms), unreliable:!t.reliable }));
+      const L = e.latest;
+      out.push({
+        eye, mapId:e.mapId, zone:e.zone, zoneKo:e.zone ? ZONE_KO[e.zone] : '', state:e.state, nTests:e.nTests, nReliable:e.nReliable, otherMap:e.otherMap,
+        baseline:e.baseline, pts,
+        latest: L ? { date:L.date, ms:L.ms, dMs:L.dMs, dTN:L.dTN, dFocus:L.dFocus, nFocusWorse:L.nFocusWorse, worse:L.worse, reasons:L.reasons.slice() } : null
+      });
+    }
+    return out;
+  }
+
   return Object.freeze({
-    DB_MIN, DB_MAX, BG_LEVEL, STIM, CARD_MM, BLIND, RULES_DEFAULT, SYMPTOMS, LEVEL, EYE_KO, PATTERN_KO,
-    sanitizeRules, grid, blindCenter, degToMm, toPx, sizePx, pxPerMmFromCard, fitCheck, dbToLevel,
-    createTest, isReliable, pct, stats, analyzeEye, assess, symptomLevel, dayNum, validDate,
-    cleanState, exportable, buildSummary, questions, r1, fmt
+    DB_MIN, DB_MAX, BG_LEVEL, STIM, CARD_MM, BLIND, RULES_DEFAULT, REL, UNIT, SYMPTOMS, LEVEL, PENDING, EYE_KO, PATTERN_KO, ZONE_KO, LEGACY,
+    sanitizeRules, grid, mapOf, pointsOf, blindCenter, degToMm, toPx, sizePx, pxPerMmFromCard, fitCheck, dbToLevel,
+    createTest, isReliable, relProblems, pct, stats, statsOf, analyzeEye, currentMapId, segmentOf, assess, symptomLevel, dayNum, validDate,
+    cleanState, exportable, buildSummary, questions, digest, r1, fmt
   });
 })();

@@ -23,6 +23,14 @@ const FU = (() => {
     { id:'unknown',     ko:'모름 (판독지를 아직 못 봄)',   hint:'기본 체크를 구성합니다' },
   ]);
   const LOC_IDS = new Set(LOCS.map(l => l.id));
+  /* 종양이 치우친 쪽. 판독지 표기: midline(가운데) · Lt.(왼쪽) · Rt.(오른쪽). 예전 기록(값 없음)은 unknown */
+  const SIDES = Object.freeze([
+    { id:'mid',     ko:'가운데 (midline)', hint:'판독지에 midline 또는 정중앙으로 적힌 경우' },
+    { id:'left',    ko:'왼쪽 (Lt.)',      hint:'판독지에 Lt. 또는 left 로 적힌 경우' },
+    { id:'right',   ko:'오른쪽 (Rt.)',     hint:'판독지에 Rt. 또는 right 로 적힌 경우' },
+    { id:'unknown', ko:'모름',            hint:'모르면 가운데와 같은 검사 지도로 봅니다' },
+  ]);
+  const SIDE_IDS = new Set(SIDES.map(s => s.id));
 
   const TYPES = Object.freeze(['tap', 'vf4', 'sym', 'smell', 'hear', 'care']);
   const TYPE_KO = Object.freeze({
@@ -30,9 +38,10 @@ const FU = (() => {
   });
   const TYPE_SET = new Set(TYPES);
 
-  /* 위치별 구성: core = 먼저 권하는 체크, sym = 증상 기록에 보이는 항목 */
+  /* 위치별 구성: core = 먼저 권하는 체크, sym = 증상 기록에 보이는 항목,
+     precise = 첫 권장이 '시야 기록' 화면의 정밀 시야검사(이때 vf4 는 빠른 확인용으로 남김) */
   const SETUP = Object.freeze({
-    sellar:       { core:['vf4','sym'],        sym:['vis1','vis2','headache'] },
+    sellar:       { core:['vf4','sym'],        sym:['vis1','vis2','headache'], precise:true },
     cavernous:    { core:['sym','vf4'],        sym:['dip','eyemv','facenum'] },
     olfactory:    { core:['smell','care','sym'], sym:['smellchg','memory'] },
     parasagittal: { core:['tap','sym','care'], sym:['weak','balance','headache'] },
@@ -170,7 +179,7 @@ const FU = (() => {
     return p ? Object.assign(base, p) : null;
   }
 
-  const empty = () => ({ v:V, loc:'unknown', next:null, mri:[], checks:[], meds:{ hormone:'unknown', date:null }, nid:1 });
+  const empty = () => ({ v:V, loc:'unknown', side:'unknown', next:null, mri:[], checks:[], meds:{ hormone:'unknown', date:null }, nid:1 });
 
   function byDate(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id; }
 
@@ -181,6 +190,7 @@ const FU = (() => {
     if(!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
     if(raw.v !== V) return out;
     if(typeof raw.loc === 'string' && LOC_IDS.has(raw.loc)) out.loc = raw.loc;
+    if(typeof raw.side === 'string' && SIDE_IDS.has(raw.side)) out.side = raw.side;   // 없으면(예전 기록) unknown
     if(isDate(raw.next)) out.next = raw.next;
     if(Array.isArray(raw.mri)){
       const seen = new Set();
@@ -221,6 +231,11 @@ const FU = (() => {
   function setLoc(state, loc){
     if(typeof loc !== 'string' || !LOC_IDS.has(loc)) return fail('종양 위치를 목록에서 골라 주세요.');
     const s = clean(state); s.loc = loc;
+    return { ok:true, state:s };
+  }
+  function setSide(state, side){
+    if(typeof side !== 'string' || !SIDE_IDS.has(side)) return fail('치우친 쪽을 목록에서 골라 주세요.');
+    const s = clean(state); s.side = side;
     return { ok:true, state:s };
   }
   function setNext(state, date){
@@ -404,7 +419,7 @@ const FU = (() => {
     const sym = [...EMERGENCY, ...cfg.sym.map(id => SYM_BY_ID[id])];
     const focus = CARE_FOCUS[key] || [];
     const care = [...focus.map(id => CARE_BY_ID[id]), ...CARE_ITEMS.filter(i => !focus.includes(i.id))];
-    return { loc:key, core, extra, sym, care, careFocus:focus.slice() };
+    return { loc:key, core, extra, sym, care, careFocus:focus.slice(), precise:!!cfg.precise };
   }
   const symEmergency = rec => rec.items.filter(id => EM_IDS.has(id));
 
@@ -417,18 +432,41 @@ const FU = (() => {
     const t = []; for(let v = a; v <= b + step / 2; v += step) t.push(Math.round(v * 1000) / 1000);
     return t;
   }
-  function graph(state){
+  /* 시야 기록(VF.digest) 결과를 숫자·날짜·고정 코드로만 다시 만듭니다. 화면에 들어가는 글자는 이 파일의 고정 문구뿐입니다. */
+  const VF_MAP_IDS = new Set(['base-v1', 'sellar-mid-v1', 'sellar-left-v1', 'sellar-right-v1', 'legacy-30']);
+  const VF_REASON_KO = Object.freeze({ cluster:'붙어 있는 나빠진 점', central:'중심 평균 하락', temporal:'귀쪽−코쪽 차이 증가', focus:'집중 구역 점 하락(임시 기준)' });
+  const num = v => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 100 ? Math.round(v * 10) / 10 : null;
+  function cleanVf(list){
+    const out = [];
+    for(const e of Array.isArray(list) ? list.slice(0, 2) : []){
+      if(!e || (e.eye !== 'R' && e.eye !== 'L') || !VF_MAP_IDS.has(e.mapId) || out.some(x => x.eye === e.eye)) continue;
+      const pts = (Array.isArray(e.pts) ? e.pts : []).filter(p => p && isDate(p.date) && num(p.v) !== null).slice(-400).map(p => ({ date:p.date, v:num(p.v), unreliable:!!p.unreliable }));
+      const b = e.baseline && typeof e.baseline === 'object' ? { ms:num(e.baseline.ms), tn:num(e.baseline.tn), focus:num(e.baseline.focus) } : null;
+      const L = e.latest && typeof e.latest === 'object' && isDate(e.latest.date) ? {
+        date:e.latest.date, ms:num(e.latest.ms), dMs:num(e.latest.dMs), dTN:num(e.latest.dTN), dFocus:num(e.latest.dFocus),
+        nFocusWorse:isInt(e.latest.nFocusWorse, 0, 3) ? e.latest.nFocusWorse : 0, worse:!!e.latest.worse,
+        reasons:(Array.isArray(e.latest.reasons) ? e.latest.reasons : []).filter(r => own(VF_REASON_KO, r)) } : null;
+      const st = ['none', 'baseline', 'tracking', 'stable', 'recheck', 'confirmed'].includes(e.state) ? e.state : 'none';
+      out.push({ eye:e.eye, mapId:e.mapId, zoneKo:e.zone === 'central' ? '중심' : e.zone === 'temporal-upper' ? '귀쪽 위' : '', state:st,
+        nReliable:isInt(e.nReliable, 0, 400) ? e.nReliable : 0, otherMap:isInt(e.otherMap, 0, 400) ? e.otherMap : 0, baseline:b, latest:L, pts });
+    }
+    return out;
+  }
+  function graph(state, extra){
     const s = clean(state);
     const pts = [];
     const panels = [];
     const mri = s.mri.map(m => ({ date:m.date, v:m.size }));
     if(mri.length) panels.push({ id:'mri', title:'MRI 종양 크기', unit:'mm', series:[{ id:'mri', label:'MRI 크기', pts:mri }] });
+    const vfx = cleanVf(extra && extra.vf).filter(e => e.pts.length)
+      .map(e => ({ id:'vfx-' + e.eye, label:`${e.eye === 'R' ? '오른쪽' : '왼쪽'} 눈 (${e.mapId})`, pts:e.pts }));
+    if(vfx.length) panels.push({ id:'vfx', title:'정밀 시야: 평균 앱 점수', unit:'점', series:vfx, fixed:[0, 30], fixedTicks:[0, 10, 20, 30] });
     const vf = [];
     for(const e of ['R', 'L']){
       const p = checksOf(s, 'vf4', e).map(c => ({ date:c.date, v:vfTotal(c), unreliable:!vfReliable(c) }));
       if(p.length) vf.push({ id:'vf-' + e, label:`${e === 'R' ? '오른쪽' : '왼쪽'} 눈`, pts:p });
     }
-    if(vf.length) panels.push({ id:'vf4', title:'간단 시야: 보인 자극 수', unit:'/12', series:vf, fixed:[0, 12] });
+    if(vf.length) panels.push({ id:'vf4', title:'간단 시야: 보인 자극 수', unit:'/12', series:vf, fixed:[0, 12], fixedTicks:[0, 3, 6, 9, 12] });
     const tp = [];
     for(const h of ['L', 'R']){
       const p = checksOf(s, 'tap').map(c => ({ date:c.date, v:c[h].n }));
@@ -438,7 +476,7 @@ const FU = (() => {
     for(const p of panels){
       const vals = p.series.flatMap(x => x.pts.map(q => q.v));
       const [lo, hi] = p.fixed || [Math.min(...vals), Math.max(...vals)];
-      p.ticks = p.fixed ? [0, 3, 6, 9, 12] : niceTicks(Math.max(0, lo - (hi - lo) * 0.1 || 0), hi + (hi - lo) * 0.1 || hi);
+      p.ticks = p.fixed ? p.fixedTicks : niceTicks(Math.max(0, lo - (hi - lo) * 0.1 || 0), hi + (hi - lo) * 0.1 || hi);
       for(const q of p.series.flatMap(x => x.pts)) pts.push(q.date);
     }
     const days = [...new Set(pts)].sort();
@@ -474,9 +512,24 @@ const FU = (() => {
     all.forEach((x, i) => { if(keep.size < 5 && x.k === 'gen') keep.add(i); });
     return all.filter((x, i) => keep.has(i)).slice(0, 5).map(x => x.t);
   }
-  function summary(state, today){
+  /* 정밀 시야 요약 문장 (고정 문구 + 숫자 + mapId) */
+  const sgn = v => v == null ? '–' : (v > 0 ? '+' : '') + v;
+  function vfLines(vf){
+    return vf.map(e => {
+      const eye = `${e.eye === 'R' ? '오른쪽' : '왼쪽'} 눈 [지도 ${e.mapId}]`;
+      const other = e.otherMap ? ` · 다른 지도 기록 ${e.otherMap}회는 비교에서 뺌` : '';
+      if(e.state === 'none' || e.state === 'baseline') return `${eye}: 기준선 측정 중 (${e.nReliable}/2)${other}`;
+      const b = e.baseline || {}, L = e.latest;
+      const head = `${eye}: 기준선 평균 ${b.ms ?? '–'}점, 귀쪽−코쪽 ${sgn(b.tn)}${b.focus != null ? `, 집중 구역(${e.zoneKo}) ${b.focus}점` : ''}`;
+      if(!L) return `${head} · 기준선 이후 검사 없음${other}`;
+      const why = L.reasons.length ? ` · 변화 사유: ${L.reasons.map(r => VF_REASON_KO[r]).join(', ')}` : ' · 기준선과 비슷함';
+      return `${head} → 최근 ${L.date} 평균 ${sgn(L.dMs)}, 귀쪽−코쪽 변화 ${sgn(L.dTN)}${L.dFocus != null ? `, 집중 구역 변화 ${sgn(L.dFocus)} (6점 이상 낮은 집중 점 ${L.nFocusWorse}/3)` : ''}${why}${other}`;
+    });
+  }
+  function summary(state, today, extra){
     const s = clean(state);
     const loc = LOCS.find(l => l.id === s.loc);
+    const vf = cleanVf(extra && extra.vf);
     const cmp = allCompare(s).map(c => ({
       key:c.type + (c.eye || ''), name:label(c), state:c.state, n:c.n,
       base:c.base ? c.base.date : null, latest:c.latest ? c.latest.date : null,
@@ -487,14 +540,14 @@ const FU = (() => {
     const emergencyDates = checksOf(s, 'sym').filter(c => symEmergency(c).length).map(c => c.date).filter(d => d !== (em.length ? lastSym.date : '')).slice(-3);
     const daysToNext = s.next && today && isDate(today) ? dayNum(s.next) - dayNum(today) : null;
     return {
-      locKo:loc.ko, next:s.next, daysToNext, mri:s.mri.slice(), mriRecent:s.mri.slice(-3), hormone:s.meds.hormone, hormoneKo:HORMONE[s.meds.hormone], hormoneDate:s.meds.date,
+      locKo:loc.ko, side:s.side, sideKo:SIDES.find(x => x.id === s.side).ko, vf, vfLines:vfLines(vf), next:s.next, daysToNext, mri:s.mri.slice(), mriRecent:s.mri.slice(-3), hormone:s.meds.hormone, hormoneKo:HORMONE[s.meds.hormone], hormoneDate:s.meds.date,
       compare:cmp, crossing:crossing(s), emergencyItems:em.map(id => SYM_BY_ID[id].ko), emergencyDate:em.length ? lastSym.date : null,
       emergencyDates, questions:questions(s), printQuestions:printQuestions(s), nChecks:s.checks.length,
     };
   }
 
   return Object.freeze({
-    V, MAX_CHECKS, MAX_MRI, TAP_MS, TOL, LOCS, TYPES, TYPE_KO, SETUP, SYM_ITEMS, EMERGENCY, CARE_ITEMS, HORMONE, LEVEL3, DIRS, DIR_KO,
+    V, MAX_CHECKS, MAX_MRI, TAP_MS, TOL, LOCS, SIDES, setSide, cleanVf, TYPES, TYPE_KO, SETUP, SYM_ITEMS, EMERGENCY, CARE_ITEMS, HORMONE, LEVEL3, DIRS, DIR_KO,
     isDate, dayNum, localDate, empty, clean, setLoc, setNext, addMri, removeMri, addCheck, removeCheck, setMeds,
     tapMetrics, tapLR, vfPlan, vfScore, vfTotal, vfReliable, compare, allCompare, label, crossing, setupFor, symEmergency,
     niceTicks, graph, questions, printQuestions, baseId, summary,

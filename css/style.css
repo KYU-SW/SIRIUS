@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   NEURIA — 뇌 MRI 쉽게 이해하는 AI 설명 도우미
+   SIRIUS — 뇌 MRI 쉽게 이해하는 AI 설명 도우미
    ═══════════════════════════════════════════════════════════ */
 :root{
   --bg:#F4F7FC; --surface:#FFFFFF; --surface-2:#F7F9FD; --surface-3:#EDF2FA;
@@ -257,6 +257,8 @@ a{color:var(--brand); text-decoration:none}
 .navitem:hover{background:var(--surface-3); color:var(--ink)}
 .navitem[aria-current="page"]{background:var(--brand-soft); color:var(--brand-dk)}
 .side .spacer{flex:1}
+.navgroup{display:flex; flex-direction:column; gap:4px; margin-top:8px; padding-top:10px; border-top:1px solid var(--line)}
+.navgroup-label{padding:0 12px 2px; font-size:calc(11.5px * var(--fs)); font-weight:700; color:var(--ink-3); letter-spacing:.02em}
 .sidefoot{border:1px solid var(--line); border-radius:12px; padding:12px; background:var(--surface-2)}
 .sidefoot .logo{padding:0 0 4px; font-size:calc(14px * var(--fs))}
 .sidefoot .logo svg{width:18px; height:18px}
@@ -288,6 +290,8 @@ a{color:var(--brand); text-decoration:none}
   .side .logo{padding:0 8px 0 4px}
   .side .spacer,.sidefoot{display:none}
   .navitem{width:auto; white-space:nowrap; padding:8px 11px}
+  .navgroup{flex-direction:row; align-items:center; gap:6px; margin:0 0 0 4px; padding:0 0 0 8px; border-top:0; border-left:1px solid var(--line)}
+  .navgroup-label{white-space:nowrap; padding:0 2px}
   .content{padding:16px}
   .appbar{padding:10px 16px}
 }
@@ -491,6 +495,12 @@ footer.sitefoot b{color:var(--ink-2)}
 .vf-level{display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius:12px; border:1px solid var(--line-2); border-left-width:6px; background:var(--surface-2)}
 .vf-lvmark{flex:none; font-weight:700; font-size:calc(13px * var(--fs)); padding:3px 9px; border-radius:999px; background:var(--surface-3); white-space:nowrap}
 .vf-lv0{border-left-color:var(--good)}
+.vf-lvp{border-left-color:var(--line-2); border-left-style:dashed}
+.vf-preview{display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap}
+.vf-preview > div{flex:1 1 220px; min-width:0}
+.vf-preview p{margin:0 0 6px}
+.vf-map.vf-map-sm{max-width:340px; flex:0 1 340px; margin:0}
+.vf-note{font-weight:700}
 .vf-lv1{border-left-color:var(--spread)}
 .vf-lv2{border-left-color:var(--spread); background:color-mix(in srgb, var(--spread) 10%, var(--surface-2))}
 .vf-lv3,.vf-lv4{border-left-color:var(--bad); background:color-mix(in srgb, var(--bad) 9%, var(--surface-2))}

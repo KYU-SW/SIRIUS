@@ -237,6 +237,8 @@ test('고급 시야 파일 읽기 도중 계정을 바꾸면 이전 기록이 �
   let release;
   b.el('vfFileIn').files=[{size:text.length,text:()=>new Promise(r=>release=r)}];
   b.el('vfPass').value='Synthetic-file-passphrase!123';
+  await b.el('vfFileGo').onclick();                          // 기록이 있으면 먼저 ‘바꾸고 불러오기’ 확인을 받는다
+  assert.equal(b.g('VFS.replaceAsk'),true);
   const work=b.el('vfFileGo').onclick();
   b.click('lockBtn');login(b);
   release(text);await work;
@@ -443,7 +445,7 @@ test('로그인 상태: 네트워크 호출은 이 컴퓨터의 /api/analyze(JPE
   assert.equal(b.g('S.analysis.kind'), 'model');
   b.click('themeBtn3'); b.click('cvdBtn');
   b.click('lockBtn');
-  assert.ok(b.storageWrites.every(k => ['neuria-theme', 'neuria-cvd'].includes(k)), JSON.stringify(b.storageWrites));
+  assert.ok(b.storageWrites.every(k => ['sirius-theme', 'sirius-cvd'].includes(k)), JSON.stringify(b.storageWrites));
   assert.deepEqual(b.cookieWrites, []);
   assert.equal(b.fetchLog.length, 1);
   assert.equal(b.fetchLog[0].url, '/api/analyze');
@@ -741,7 +743,7 @@ test('시야 기록: 로그인한 뒤에 열리고, 네트워크·브라우저 �
   assert.match(b.el('vfHistory').innerHTML, /2026-01-01/, '하네스 점검: 기록이 화면에 그려져야 함');
   await b.g("VFFile.encrypt({ tests: VFS.tests, symptoms: VFS.symptoms, rules: VFS.rules }, 'synthetic-secret-phrase-1')");
   assert.equal(b.fetchLog.length, 0, '시야 기록은 네트워크를 쓰지 않는다');
-  const allowed = new Set(['neuria-theme', 'neuria-cvd', '-neuria-theme', '-neuria-cvd']);
+  const allowed = new Set(['sirius-theme', 'sirius-cvd', '-neuria-theme', '-neuria-cvd']);
   assert.deepEqual(b.storageWrites.filter(k => !allowed.has(k)), [], '브라우저 저장소에는 시야 기록을 쓰지 않는다');
   assert.equal(b.cookieWrites.length, 0);
 });
@@ -786,7 +788,7 @@ test('시야 기록: 화면에 넣는 모든 값은 고정 문구·숫자이고 
 });
 
 test('정적 점검: 시야 기록 코드에는 네트워크·저장소·동적 코드 실행이 없다', () => {
-  for (const name of ['vf-core.js', 'vf-file.js', 'vf-ui.js']) {
+  for (const name of ['vf-map.js', 'vf-core.js', 'vf-file.js', 'vf-ui.js']) {
     const code = read('js/' + name);
     assert.doesNotMatch(code, /\bfetch\s*\(|localStorage|sessionStorage|indexedDB|XMLHttpRequest|sendBeacon|WebSocket|window\.open|\beval\s*\(|new Function|insertAdjacentHTML|document\.write|postMessage/, name);
     assert.doesNotMatch(code, /https?:\/\//, name + ': 외부 주소 금지');
@@ -829,4 +831,106 @@ test('경과 관찰: logout() 은 기록 화면과 S.followup 을 지운다', ()
   b.g("S.followup = FU.addMri(S.followup, '2026-01-01', 18.5, '2026-11-10').state; followupEnter();");
   b.g('logout()');
   assert.equal(b.g('S.followup'), null); assert.equal(b.el('fuRoot').innerHTML, '');
+});
+
+/* ═══════════════ 시야 지도·자동 저장·메뉴·브랜드 (수정 요청서 ①~⑨) ═══════════════ */
+const vfRec = (b, eye, mapId, date, v = 24) => b.g(`(() => { const m = VFMap.mapById('${mapId}', '${eye}');
+  VFS.tests.push({ date:'${date}', eye:'${eye}', mapId:'${mapId}', pts:VFMap.ptsOf(m), th:m.points.map(() => ${v}), un:[], rel:{ fp:0, fpN:6, fl:0, flN:6, fn:0, fnN:3 }, reliable:true, dist:33 }); })()`);
+
+test('① 시야 기록: 검사 0회면 ‘아직 비교 전입니다 (기준선 측정 중 0/2)’를 보여 주고 안정(✓)으로 보이지 않는다', () => {
+  const b = buildBrowser(); login(b); b.g("go('field')");
+  const html = b.el('vfStatus').innerHTML;
+  assert.match(html, /아직 비교 전입니다 \(기준선 측정 중 0\/2\)/);
+  assert.match(html, /vf-lvp/); assert.doesNotMatch(html, /✓ 안정|기준선과 비슷합니다/);
+  vfRec(b, 'R', 'base-v1', '2026-01-01'); b.g('vfRenderHome()');
+  assert.match(b.el('vfStatus').innerHTML, /기준선 측정 중 1\/2/);
+});
+
+test('④⑦ 경과 관찰의 정밀 시야검사 버튼은 loc/side 를 넘기고, 치우친 쪽 눈을 먼저 고른 검사 준비 화면을 연다', () => {
+  const b = buildBrowser(); login(b);
+  b.g("S.followup = FU.setSide(FU.setLoc(S.followup, 'sellar').state, 'left').state; followupEnter();");
+  const home = b.el('fuRoot').innerHTML;
+  assert.match(home, /정밀 시야검사/); assert.match(home, /data-fu="field"/); assert.match(home, /빠른 확인/);
+  assert.ok(home.indexOf('정밀 시야검사') < home.indexOf('간단 시야'), '정밀 시야검사가 첫 권장');
+  assert.match(home, /id="fuSide"/); assert.match(home, /Rt\./); assert.match(home, /Lt\./); assert.match(home, /midline/);
+  assert.match(home, /왼쪽 눈을 먼저/);
+  b.g("fuOnClick({ target:{ closest:() => ({ dataset:{ fu:'field' } }) } })");
+  assert.equal(b.el('pageTitle').textContent, '시야 기록');
+  assert.equal(b.g('VFS.ctx.loc'), 'sellar'); assert.equal(b.g('VFS.ctx.side'), 'left'); assert.equal(b.g('VFS.ctx.from'), true);
+  assert.equal(b.g('VFS.eye'), 'L');
+  assert.equal(b.el('vfSetup').hidden, false);
+  const pv = b.el('vfMapPreview').innerHTML;
+  assert.match(pv, /sellar-left-v1/); assert.match(pv, /34점/); assert.match(pv, /왼눈은 중심/); assert.match(pv, /첫 기준선을 만듭니다 \(1\/2\)/);
+  assert.match(pv, /집중점 3쌍/); assert.match(pv, /21°/); assert.match(pv, /모름은 가운데/);
+  b.g("VFS.eye = 'R'; vfRenderSetup()");
+  assert.match(b.el('vfMapPreview').innerHTML, /오른눈은 귀쪽 위/);
+});
+
+test('⑥ 위치·쪽이 바뀌어 지도가 달라지면 검사 전에 ‘새 기준선을 만듭니다 (1/2)’를 안내한다', () => {
+  const b = buildBrowser(); login(b); b.g("go('field')");
+  vfRec(b, 'R', 'base-v1', '2026-01-01'); vfRec(b, 'R', 'base-v1', '2026-01-02');
+  b.g("vfShow('setup')");
+  assert.match(b.el('vfMapPreview').innerHTML, /base-v1/);
+  assert.match(b.el('vfMapPreview').innerHTML, /같은 지도\(base-v1\)의 내 기준선과 비교합니다/);
+  b.g("S.followup = FU.setLoc(S.followup, 'sellar').state; vfEnter()");
+  const pv = b.el('vfMapPreview').innerHTML;
+  assert.match(pv, /sellar-mid-v1/); assert.match(pv, /base-v1 → sellar-mid-v1/); assert.match(pv, /새 기준선을 만듭니다 \(1\/2\)/);
+});
+
+test('⑧ 정밀 시야 결과는 S.vf 로 옮겨 saveVault 로 자동 저장되고, 다시 로그인하면 legacy-30 기록도 읽힌다', async () => {
+  const b = buildBrowser(); login(b); b.g("go('field')");
+  let saves = 0; b.context.saveVault = async () => { saves++; return { ok:true }; };
+  vfRec(b, 'L', 'sellar-mid-v1', '2026-01-01');
+  b.g('vfPersist()'); await b.flush();
+  assert.equal(saves, 1); assert.equal(b.g('VFS.save'), 'ok'); assert.equal(b.g('VFS.dirty'), false);
+  assert.equal(b.g('S.vf.app'), 'sirius-vf'); assert.equal(b.g('S.vf.tests[0].mapId'), 'sellar-mid-v1'); assert.equal(b.g('S.vf.tests[0].pts.length'), 34);
+  assert.match(b.el('vfDirty').textContent, /암호화해 이 브라우저에 저장/);
+  b.context.saveVault = async () => ({ ok:false });
+  b.g('vfPersist()'); await b.flush();
+  assert.equal(b.g('VFS.dirty'), true); assert.match(b.el('vfDirty').textContent, /저장하지 못했습니다/);
+  b.click('lockBtn');
+  assert.equal(b.g('S.vf'), null); assert.equal(b.g('VFS.tests.length'), 0);
+  b.g(`S.vf = { app:'sirius-vf', v:1, symptoms:[], tests:[{ date:'2026-01-01', eye:'R', th:VF.grid('R').map(() => 22), un:[], rel:{ fp:0, fpN:5, fl:0, flN:5, fn:0, fnN:3 }, dist:33 }] };`);
+  login(b);
+  assert.equal(b.g('VFS.tests.length'), 1); assert.equal(b.g('VFS.tests[0].mapId'), 'legacy-30');
+  b.g(`S.vf = { app:'sirius-vf', v:1, tests:'<img>' }; vfLoadSession();`);
+  assert.equal(b.g('VFS.tests.length'), 0, '형식이 틀린 금고 값은 버린다');
+  assert.match(read('js/vault.js'), /vf:S\.vf \|\| null/);
+});
+
+test('⑧ 경과 관찰 진료 요약·그래프에 정밀 시야(평균·귀쪽−코쪽·집중 구역·mapId)가 MRI 와 함께 들어간다', () => {
+  const b = buildBrowser(); login(b);
+  b.g("S.followup = FU.addMri(FU.setLoc(S.followup, 'sellar').state, '2026-01-01', 18, '2026-11-01').state; followupEnter();");
+  vfRec(b, 'R', 'sellar-mid-v1', '2026-01-02'); vfRec(b, 'R', 'sellar-mid-v1', '2026-01-03'); vfRec(b, 'R', 'sellar-mid-v1', '2026-01-04', 20);
+  b.g("fuGo('summary')");
+  const html = b.el('fuRoot').innerHTML;
+  assert.match(html, /정밀 시야검사 \(앱 점수/); assert.match(html, /sellar-mid-v1/); assert.match(html, /집중 구역 변화 -4/); assert.match(html, /귀쪽−코쪽 변화/);
+  assert.match(html, /MRI 종양 크기/); assert.match(html, /정밀 시야: 평균 앱 점수/);
+  assert.match(b.g('fuSummaryText(FU.summary(S.followup, fuToday(), fuVfExtra()))'), /정밀 시야검사\(앱 점수[\s\S]*sellar-mid-v1/);
+});
+
+test('⑨ 메뉴 순서는 경과 관찰 → 시야 기록 → 가이드 → … → MRI 참고 보기(영상 보기·분석 결과·분석 기록)', () => {
+  const side = INDEX_HTML.slice(INDEX_HTML.indexOf('<aside class="side">'), INDEX_HTML.indexOf('</aside>'));
+  const order = [...side.matchAll(/data-go="(\w+)"/g)].map(m => m[1]);
+  assert.deepEqual(order, ['followup', 'field', 'guide', 'faq', 'mypage', 'analyze', 'result', 'history']);
+  const group = side.slice(side.indexOf('MRI 참고 보기'));
+  assert.ok(['analyze', 'result', 'history'].every(p => group.includes(`data-go="${p}"`)));
+  assert.ok(side.indexOf('MRI 참고 보기') > side.indexOf('data-go="mypage"'));
+});
+
+test('⑨ 브랜드는 SIRIUS 로 통일하고, 예전 NEURIA 설정(테마·색각·아이디)은 새 키로 옮긴다', () => {
+  assert.doesNotMatch(INDEX_HTML, /NEURIA/); assert.match(INDEX_HTML, /<title>SIRIUS/);
+  assert.equal(JSON.parse(read('package.json')).name, 'sirius');
+  assert.doesNotMatch(read('js/shell.js'), /const \w+_KEY = 'neuria-/);
+  const b = buildBrowser({ seedStorage:{ 'neuria-theme':'dark', 'neuria-cvd':'on', 'neuria-last-id':'synthetic_user' } });
+  assert.equal(b.g("localStorage.getItem('sirius-theme')"), 'dark');
+  assert.equal(b.g("localStorage.getItem('sirius-cvd')"), 'on');
+  assert.equal(b.g("localStorage.getItem('sirius-last-id')"), 'synthetic_user');
+  for (const k of ['neuria-theme', 'neuria-cvd', 'neuria-last-id']) assert.equal(b.g(`localStorage.getItem('${k}')`), null, k);
+  assert.equal(b.el('loginId').value, 'synthetic_user', '기억한 아이디가 그대로 채워짐');
+  const keep = buildBrowser({ seedStorage:{ 'neuria-theme':'dark', 'sirius-theme':'light' } });
+  assert.equal(keep.g("localStorage.getItem('sirius-theme')"), 'light', '새 키가 있으면 덮어쓰지 않음');
+  /* 계정·금고 저장 키와 이메일 해시 pepper·복구 키 접두사는 바꾸지 않는다 (바꾸면 기존 계정을 열 수 없음) */
+  const store = read('js/store.js');
+  assert.match(store, /AKEY = 'mri-accounts-v3'/); assert.match(store, /EMAIL_PEPPER = 'mri-reader\/email\/v3'/); assert.match(store, /'MRI-' \+/);
 });

@@ -3,8 +3,22 @@
    화면 전환 · 테마 · 랜딩 · 사이드바 라우터
    ═══════════════════════════════════════════════════════════ */
 
+/* ── 이전 브랜드(NEURIA) 설정 키 → SIRIUS 키로 한 번 옮깁니다 ──
+   새 키가 없을 때만 예전 값을 복사하고, 옮긴 뒤 예전 키를 지웁니다. 계정·금고 키(mri-accounts-v3 등)는 바꾸지 않습니다. */
+const LEGACY_PREF_KEYS = Object.freeze({ 'sirius-theme':'neuria-theme', 'sirius-cvd':'neuria-cvd', 'sirius-last-id':'neuria-last-id' });
+function migratePref(key){
+  const old = LEGACY_PREF_KEYS[key];
+  try{
+    const v = localStorage.getItem(old);
+    if(v === null) return;
+    if(localStorage.getItem(key) === null) localStorage.setItem(key, v);
+    localStorage.removeItem(old);
+  }catch(e){}
+}
+
 /* ── 테마 (밝게 / 어둡게 / 시스템) ───────────────────────── */
-const THEME_KEY = 'neuria-theme';
+const THEME_KEY = 'sirius-theme';
+migratePref(THEME_KEY);
 function applyTheme(t){
   if(t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
   else document.documentElement.removeAttribute('data-theme');
@@ -25,7 +39,8 @@ function toggleTheme(){
 ['themeBtn','themeBtn2','themeBtn3'].forEach(id => { const b = $(id); if(b) b.onclick = toggleTheme; });
 
 /* ── 색맹(색각 보조) 모드 — 저장되고, 어느 화면에서든 켜고 끌 수 있습니다 ── */
-const CVD_KEY = 'neuria-cvd';
+const CVD_KEY = 'sirius-cvd';
+migratePref(CVD_KEY);
 function cvdOn(){ return document.documentElement.getAttribute('data-cvd') === 'on'; }
 function applyCvd(on){
   document.documentElement.setAttribute('data-cvd', on ? 'on' : 'off');
@@ -79,8 +94,8 @@ document.querySelectorAll('[data-landing]').forEach(b => b.onclick = () => {
 
 /* ── 사이드바 라우터 ─────────────────────────────────────── */
 const PAGE_TITLE = {
-  followup:'경과 관찰', analyze:'영상 보기', result:'분석 결과', history:'분석 기록',
-  field:'시야 기록', guide:'사용 가이드', faq:'자주 묻는 질문', mypage:'마이페이지'
+  followup:'경과 관찰', field:'시야 기록', guide:'사용 가이드', faq:'자주 묻는 질문', mypage:'마이페이지',
+  analyze:'영상 보기', result:'분석 결과', history:'분석 기록'           // 메뉴에서는 ‘MRI 참고 보기’ 묶음 아래
 };
 /* 로그인(계정 + 암호화 열쇠) 없이는 어떤 화면도 열리지 않습니다 */
 function go(page){
@@ -110,9 +125,10 @@ document.querySelectorAll('[data-soon]').forEach(b => b.onclick = () => {
 });
 
 /* ── 아이디 기억하기 ─────────────────────────────────────── */
-const ID_KEY = 'neuria-last-id';
+const ID_KEY = 'sirius-last-id';
 (function initRememberId(){
   if(CONFIG.privacy) return;
+  migratePref(ID_KEY);
   let v = null;
   try{ v = localStorage.getItem(ID_KEY); }catch(e){}
   if(v){ $('loginId').value = v; $('rememberId').checked = true; }

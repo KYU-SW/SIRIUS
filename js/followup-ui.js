@@ -129,6 +129,21 @@ function fuStatusChip1(c){
   return `<span class="fu-chip fu-chg">▲ 변화 있음${c.repeated ? ' · 이어짐' : ''}</span>`;
 }
 function fuCmp(type, eye){ const c = FU.compare(S.followup, type, eye); return c.state === 'none' ? null : c; }
+/* 시야 기록(정밀 시야검사) 결과 요약. 시야 기록 모듈이 없으면(단독 테스트 등) 빈 목록 */
+const fuVfExtra = () => ({ vf: (typeof VF !== 'undefined' && typeof VFS !== 'undefined' && VF.digest) ? VF.digest({ tests:VFS.tests, rules:VFS.rules }) : [] });
+const FU_FIRST_EYE_KO = { left:'왼쪽으로 치우쳐 있어 <b>왼쪽 눈을 먼저</b> 검사하세요.', right:'오른쪽으로 치우쳐 있어 <b>오른쪽 눈을 먼저</b> 검사하세요.' };
+function fuPreciseRow(s){
+  const vf = FU.cleanVf(fuVfExtra().vf);
+  const chip = e => {
+    const d = vf.find(x => x.eye === e);
+    if(!d) return '<span class="fu-chip fu-none">기준선 없음</span>';
+    if(d.state === 'none' || d.state === 'baseline') return `<span class="fu-chip fu-base">기준선 ${d.nReliable}/2</span>`;
+    if(d.latest && d.latest.worse) return '<span class="fu-chip fu-chg">▲ 변화 있음</span>';
+    return d.latest ? '<span class="fu-chip fu-same">비슷함</span>' : '<span class="fu-chip fu-base">기준선 완료</span>';
+  };
+  const first = FU_FIRST_EYE_KO[s.side] || '치우친 쪽을 모르거나 가운데이면 어느 눈부터 해도 됩니다.';
+  return `<li><div><b>정밀 시야검사</b> <span class="fu-rec">권장</span><div class="tiny">‘시야 기록’ 화면에서 한 눈씩 28~34곳의 밝기 역치를 재고 내 기준선과 비교합니다. 위치·치우친 쪽에 맞춘 검사 지도를 씁니다. ${first}</div><div class="fu-chips">${['R', 'L'].map(e => `<span class="fu-eye">${FU_EYE[e]} 눈 ${chip(e)}</span>`).join(' ')}</div></div><button class="btn sm primary" data-fu="field">시작</button></li>`;
+}
 const fuSel = (id, cur, opts) => `<select id="${id}">${opts.map(([v, t]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 /** untilToday=true 이면 오늘까지만 고를 수 있습니다 (촬영일·체크 날짜). false 는 미래 날짜 가능(다음 MRI 예정일). */
 const fuDateIn = (id, val, untilToday) => `<input id="${id}" type="date" value="${esc(val || '')}" min="2000-01-01" max="${untilToday ? fuToday() : '2100-12-31'}">`;
@@ -171,7 +186,8 @@ function fuHome(){
       : `<button class="btn sm" data-fu="askMri" data-k="${esc(m.date)}" aria-label="${esc(m.date)} MRI 기록 지우기">지우기</button>`;
     return `<tr><td>${esc(m.date)}</td><td>${m.size} mm</td><td>${del}</td></tr>`;
   }).join('');
-  const core = cfg.core.map(t => fuCheckRow(t, true)).join('');
+  const core = (cfg.precise ? fuPreciseRow(s) : '') + cfg.core.map(t => fuCheckRow(t, true, cfg.precise)).join('');
+  const sideOpts = FU.SIDES.map(x => [x.id, x.ko]);
   const extra = cfg.extra.map(t => fuCheckRow(t, false)).join('');
   const days = s.next ? Math.round(FU.dayNum(s.next) - FU.dayNum(fuToday())) : null;
   const nextNote = days === null ? '' : days >= 0 ? ` (오늘부터 ${days}일 뒤)` : ` (예정일이 ${-days}일 지났습니다. 병원에 일정을 확인해 보세요)`;
@@ -180,6 +196,7 @@ function fuHome(){
     <p class="tiny">판독지의 내용을 보고 직접 입력합니다. 입력한 값은 계정별로 암호화해 이 브라우저에만 저장하며 서버로 보내지 않습니다.</p>
     <div class="fu-grid">
       <div class="field"><label for="fuLoc">종양 위치</label>${fuSel('fuLoc', s.loc, locOpts)}<span class="help">${esc(FU.LOCS.find(l => l.id === s.loc).hint)}. 위치를 바꾸면 아래 체크 구성이 바뀝니다.</span></div>
+      <div class="field"><label for="fuSide">치우친 쪽</label>${fuSel('fuSide', s.side, sideOpts)}<span class="help">판독지 표기: <b>Rt.</b> = 오른쪽, <b>Lt.</b> = 왼쪽, <b>midline</b> = 가운데. 모르면 ‘모름’(가운데와 같은 검사 지도)을 고르세요. ${esc(FU.SIDES.find(x => x.id === s.side).hint)}.</span></div>
       <div class="field"><label for="fuNext">다음 MRI 예정일</label>${fuDateIn('fuNext', s.next)}<span class="help">${esc(s.next ? s.next + nextNote : '아직 모르면 비워 두세요.')}</span></div>
     </div>
     <h4 class="fu-h4">MRI 크기 기록 추가</h4>
@@ -213,21 +230,22 @@ function fuHome(){
     <span class="tiny">요약에는 의사에게 할 질문과 응급 안내가 들어 있습니다.</span>
   </div></div>`;
 }
-function fuCheckRow(type, core){
+function fuCheckRow(type, core, quick){
   const c = type === 'vf4' ? null : fuCmp(type);
   let chips;
   if(type === 'vf4'){ chips = ['R', 'L'].map(e => `<span class="fu-eye">${FU_EYE[e]} 눈 ${fuStatusChip(fuCmp('vf4', e))}</span>`).join(' '); }
   else chips = fuStatusChip(c);
   const desc = {
     tap:'왼손·오른손을 10초씩 두드린 횟수와 리듬, 좌우 차이를 기록합니다.',
-    vf4:'한 눈씩 가운데 점을 보며 위·아래·왼쪽·오른쪽에 나타나는 빛에 반응합니다. 정밀 시야검사가 아니며 변화 확인용입니다.',
+    vf4:quick ? '빠른 확인용(약 1분): 한 눈씩 위·아래·왼쪽·오른쪽 빛에 반응합니다. 정밀 시야검사를 대신하지 않습니다.'
+              : '한 눈씩 가운데 점을 보며 위·아래·왼쪽·오른쪽에 나타나는 빛에 반응합니다. 정밀 시야검사가 아니며 변화 확인용입니다.',
     sym:'응급 항목과 내 위치에서 살펴볼 증상을 체크합니다.',
     smell:'집에 있는 커피·식초 같은 냄새를 코 한쪽씩 맡아 보고 기록합니다.',
     hear:'이어폰으로 좌우 소리를 들어 보고 어느 정도 들렸는지 기록합니다.',
     care:'보호자가 곁에서 본 성격·행동·경련·균형의 변화를 기록합니다.',
   }[type];
   const view = { tap:'tapIntro', vf4:'vfIntro', sym:'sym', smell:'smell', hear:'hear', care:'care' }[type];
-  return `<li><div><b>${esc(FU.TYPE_KO[type])}</b>${core ? ' <span class="fu-rec">권장</span>' : ''}<div class="tiny">${esc(desc)}</div><div class="fu-chips">${chips}</div></div><button class="btn sm${core ? ' primary' : ''}" data-fu="go" data-v="${view}">시작</button></li>`;
+  return `<li><div><b>${esc(FU.TYPE_KO[type])}</b>${core ? (type === 'vf4' && quick ? ' <span class="fu-rec">빠른 확인</span>' : ' <span class="fu-rec">권장</span>') : ''}<div class="tiny">${esc(desc)}</div><div class="fu-chips">${chips}</div></div><button class="btn sm${core ? ' primary' : ''}" data-fu="go" data-v="${view}">시작</button></li>`;
 }
 function fuRecLine(c){
   if(c.type === 'tap') return `왼손 ${c.L.n}회${c.L.cv !== null ? '(리듬 흔들림 ' + c.L.cv + '%)' : ''} · 오른손 ${c.R.n}회${c.R.cv !== null ? '(' + c.R.cv + '%)' : ''} · 좌우 차이 ${FU.tapLR(c) === null ? '-' : FU.tapLR(c) + '%'}`;
@@ -264,7 +282,7 @@ const FU_MARK = [
 ];
 const FU_GLYPH = ['●', '■', '▲'];
 function fuGraphHtml(){
-  const g = FU.graph(S.followup);
+  const g = FU.graph(S.followup, fuVfExtra());
   if(!g.panels.length) return '<p class="tiny">MRI 크기나 체크를 기록하면 여기에 날짜별로 나타납니다.</p>';
   const W = 640, PL = 58, PR = 16, PT = 12, PB = 30, H = 150;
   const xs = d => { const n = FU.dayNum(d); return g.maxDay === g.minDay ? (PL + W - PR) / 2 : PL + (n - g.minDay) / (g.maxDay - g.minDay) * (W - PL - PR); };
@@ -282,12 +300,13 @@ function fuGraphHtml(){
     p.series.forEach((se, i) => {
       for(const q of se.pts){
         const dx = (i - (p.series.length - 1) / 2) * 6;
-        svg += `<g><title>${esc(se.label)} ${esc(q.date)}: ${q.v}${esc(p.unit)}${q.unreliable ? ' (확인용 응답이 많아 비교에서 제외)' : ''}</title>${FU_MARK[i % 3](Math.round((xs(q.date) + dx) * 10) / 10, Math.round(ys(q.v) * 10) / 10, 'fu-pt fu-s' + (i % 3) + (q.unreliable ? ' fu-hollow' : ''))}</g>`;
+        svg += `<g><title>${esc(se.label)} ${esc(q.date)}: ${q.v}${esc(p.unit)}${q.unreliable ? (p.id === 'vfx' ? ' (신뢰도 낮음, 비교에서 제외)' : ' (확인용 응답이 많아 비교에서 제외)') : ''}</title>${FU_MARK[i % 3](Math.round((xs(q.date) + dx) * 10) / 10, Math.round(ys(q.v) * 10) / 10, 'fu-pt fu-s' + (i % 3) + (q.unreliable ? ' fu-hollow' : ''))}</g>`;
       }
     });
     svg += '</svg>';
     const legend = p.series.map((se, i) => `<span class="fu-lg fu-s${i % 3}t">${FU_GLYPH[i % 3]} ${esc(se.label)}</span>`).join(' ');
-    out.push(`<figure class="fu-fig"><figcaption><b>${esc(p.title)}</b> <span class="tiny">(눈금 단위: ${esc(p.unit)}${p.id === 'mri' ? ' · 0에서 시작하지 않음' : ''})</span></figcaption>${svg}<div class="tiny fu-legend">${legend}</div></figure>`);
+    const note = p.id === 'mri' ? ' · 0에서 시작하지 않음' : p.id === 'vfx' ? ' · 눈마다 지금 비교에 쓰는 지도(mapId)의 기록만 · 속 빈 점은 신뢰도 낮음' : '';
+    out.push(`<figure class="fu-fig"><figcaption><b>${esc(p.title)}</b> <span class="tiny">(눈금 단위: ${esc(p.unit)}${note})</span></figcaption>${svg}<div class="tiny fu-legend">${legend}</div></figure>`);
   }
   const cr = g.crossing.cross ? `<div class="fu-cross" role="note"><b>영상과 체크가 엇갈려 보여요.</b> ${esc(g.crossing.text)}</div>`
     : g.crossing.undetermined ? `<p class="tiny" role="note">엇갈림 판단 불가: ${esc(g.crossing.text)}</p>` : '';
@@ -526,9 +545,10 @@ function fuMedsForm(){
 function fuSummaryText(m){
   const L = [];
   L.push('SIRIUS 경과 관찰 요약 (진단이 아닌 자가 기록)');
-  L.push(`종양 위치: ${m.locKo}`);
+  L.push(`종양 위치: ${m.locKo} · 치우친 쪽: ${m.sideKo}`);
   L.push(`다음 MRI 예정일: ${m.next || '미정'}`);
   if(m.mri.length){ L.push('MRI 크기 기록:'); for(const x of m.mri) L.push(`- ${x.date} ${x.size} mm`); }
+  if(m.vfLines.length){ L.push('정밀 시야검사(앱 점수, 내 기준선과 비교):'); for(const x of m.vfLines) L.push(`- ${x}`); }
   L.push(`약 사용 기록(메드록시프로게스테론 주사 등): ${m.hormoneKo}${m.hormoneDate ? ' (' + m.hormoneDate + ')' : ''}`);
   if(m.compare.length){
     L.push('첫 측정(기준점)과의 비교:');
@@ -550,13 +570,14 @@ function fuPrintCompact(m){
   const em = (m.emergencyItems.length ? `<p><b>응급 항목 체크(${esc(m.emergencyDate)}):</b> ${esc(m.emergencyItems.join(' · '))}</p>` : '')
     + (m.emergencyDates.length ? `<p>과거에 응급 항목을 체크한 날짜: ${esc(m.emergencyDates.join(', '))}</p>` : '');
   return `<div id="fuPrintCompact" class="fu-print-only"><h3>SIRIUS 경과 관찰 요약 <small>${esc(fuToday())} · 진단이 아닌 자가 기록</small></h3>
-    <p>종양 위치 <b>${esc(m.locKo)}</b> · 다음 MRI <b>${esc(m.next || '미정')}</b> · 약 사용 기록(메드록시프로게스테론 주사 등) <b>${esc(m.hormoneKo)}</b>${(m.hormone === 'now' || m.hormone === 'past') ? ' — 의사에게 알려 주세요' : ''}</p>
-    <p>최근 MRI 크기 기록: ${mri}</p>${cmp}${note}${em}
+    <p>종양 위치 <b>${esc(m.locKo)}</b> · 치우친 쪽 <b>${esc(m.sideKo)}</b> · 다음 MRI <b>${esc(m.next || '미정')}</b> · 약 사용 기록(메드록시프로게스테론 주사 등) <b>${esc(m.hormoneKo)}</b>${(m.hormone === 'now' || m.hormone === 'past') ? ' — 의사에게 알려 주세요' : ''}</p>
+    <p>최근 MRI 크기 기록: ${mri}</p>${m.vfLines.length ? `<p><b>정밀 시야(앱 점수)</b><br>${m.vfLines.map(esc).join('<br>')}</p>` : ''}${cmp}${note}${em}
     <p><b>의사에게 할 질문</b></p><ol>${m.printQuestions.map(q => `<li>${esc(q)}</li>`).join('')}</ol>
     <p class="fu-safe">응급: 갑작스러운 마비·말 어눌함·얼굴 처짐·평소와 다른 심한 두통·갑작스러운 시력 저하는 바로 119. 이 요약은 집에서 한 간단한 자가 기록이며 진단이나 의학적 판단이 아닙니다. 비교는 앱 화면 표시용 기준이며 의학적 기준이 아닙니다.</p></div>`;
 }
 function fuSummary(){
-  const m = FU.summary(S.followup, fuToday());
+  const m = FU.summary(S.followup, fuToday(), fuVfExtra());
+  const vfx = m.vfLines.length ? `<h4 class="fu-h4">정밀 시야검사 (앱 점수 · 내 기준선과 비교)</h4><ul class="fu-q">${m.vfLines.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="tiny">평균·귀쪽−코쪽(좌우 짝)·집중 구역 변화와 검사 지도(mapId)를 함께 적었습니다. 같은 지도의 기록끼리만 비교합니다.</p>` : '';
   const mri = m.mri.length ? `<div class="fu-scroll"><table class="rec fu-narrow"><thead><tr><th>촬영일</th><th>크기</th></tr></thead><tbody>${m.mri.map(x => `<tr><td>${esc(x.date)}</td><td>${x.size} mm</td></tr>`).join('')}</tbody></table></div>` : '<p>입력한 MRI 기록 없음</p>';
   const cmp = m.compare.length ? `<div class="fu-scroll"><table class="rec"><thead><tr><th>체크</th><th>기준점</th><th>최근</th><th>비교</th></tr></thead><tbody>${m.compare.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.base)}</td><td>${esc(c.latest)}</td><td>${c.state === 'baseline' ? '기준점만 있음' : c.state === 'same' ? '비슷함' : '▲ 변화 있음' + (c.repeated ? ' (이어짐)' : '') + '<br><span class="tiny">' + esc(c.reasons.join(' · ')) + '</span>'}${c.limited ? '<br><span class="tiny">' + esc(c.limitNote) + '</span>' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p>체크 기록 없음</p>';
   const em = m.emergencyItems.length ? `<div class="fu-119"><b>응급 항목을 체크한 기록이 있습니다 (${esc(m.emergencyDate)}).</b> ${esc(m.emergencyItems.join(' · '))}</div>` : '';
@@ -565,7 +586,7 @@ function fuSummary(){
     : '<div class="fu-actions"><button class="btn primary" data-fu="exportAsk">인쇄 · PDF · 복사…</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div>';
   return `${fuPrintCompact(m)}<div class="card fu-screen"><div class="card-hd"><h3>진료 전 요약</h3><span class="right tiny">${esc(fuToday())} 기준 · 진단이 아닌 자가 기록</span></div><div class="card-pad">
     ${FU_EMERGENCY_HTML}${em}
-    <h4 class="fu-h4">종양 정보</h4><p>위치: <b>${esc(m.locKo)}</b> · 다음 MRI 예정일: <b>${esc(m.next || '미정')}</b></p>${mri}
+    <h4 class="fu-h4">종양 정보</h4><p>위치: <b>${esc(m.locKo)}</b> · 치우친 쪽: <b>${esc(m.sideKo)}</b> · 다음 MRI 예정일: <b>${esc(m.next || '미정')}</b></p>${mri}${vfx}
     <h4 class="fu-h4">약 사용 기록</h4><p>메드록시프로게스테론 주사 등: ${esc(m.hormoneKo)}${m.hormoneDate ? ' · ' + esc(m.hormoneDate) : ''}${(m.hormone === 'now' || m.hormone === 'past') ? '<br><b>의사에게 꼭 알리세요.</b>' : ''}</p>
     <h4 class="fu-h4">첫 측정(기준점)과의 비교</h4>${cmp}${m.crossing.cross ? `<div class="fu-cross" role="note">${esc(m.crossing.text)}</div>` : ''}
     <h4 class="fu-h4">MRI 크기와 체크 그래프</h4>${fuGraphHtml()}
@@ -574,7 +595,7 @@ function fuSummary(){
   </div></div><div class="card fu-screen"><div class="card-pad">${ask}${FUS.copyMsg ? `<p class="tiny" role="status">${esc(FUS.copyMsg)}</p>` : ''}</div></div>`;
 }
 async function fuExportCopy(){
-  const text = fuSummaryText(FU.summary(S.followup, fuToday()));
+  const text = fuSummaryText(FU.summary(S.followup, fuToday(), fuVfExtra()));
   const acc = S.acc, key = S.masterKey, tok = ++FUS.copyTok;
   let ok = false;
   try{ if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); ok = true; } }catch(e){}
@@ -762,6 +783,11 @@ function fuOnClick(e){
     const r = FU.addMri(S.followup, fuVal('fuMriDate'), fuVal('fuSize'), today);
     return void fuApply(r, r.ok ? (r.replaced ? '같은 날짜의 기록을 새 크기로 바꿨습니다.' : 'MRI 기록을 추가했습니다.') : '');
   }
+  if(a === 'field'){                                             // 정밀 시야검사: 위치·치우친 쪽을 넘겨 시야 기록 검사 준비로 이동
+    const s = fuState();
+    if(typeof vfOpenFromFollowup === 'function') vfOpenFromFollowup({ loc:s.loc, side:s.side });
+    return;
+  }
   if(a === 'tapStart') return fuTapStart();
   if(a === 'vfStart') return fuVfStart();
   if(a === 'saveTap'){ const d = FUS.draft; if(!d || d.type !== 'tap') return; const r = FU.addCheck(S.followup, { type:'tap', date:today, L:d.L, R:d.R }, today); if(fuApply(r, '두드리기 기록을 저장했습니다.')){ FUS.draft = null; FUS.view = 'home'; fuRender(); } return; }
@@ -794,6 +820,7 @@ function fuOnChange(e){
   const t = e.target; if(!t || !fuLogged() || FUS.busy) return;
   if(t.id === 'fuRsFile'){ FUS.rs = null; FUS.bkSeq++; fuBkPreview(); const e = fuEl('fuRsPass'); if(e) e.value = ''; return fuBkSay('', true); }   // 새 파일 선택 — 이전 결과 무효
   if(t.id === 'fuLoc') return void fuApply(FU.setLoc(S.followup, t.value), '종양 위치를 바꿨습니다. 아래 체크 구성이 바뀝니다.');
+  if(t.id === 'fuSide') return void fuApply(FU.setSide(S.followup, t.value), '치우친 쪽을 바꿨습니다. 정밀 시야검사 지도가 바뀌면 새 기준선을 만듭니다.');
   if(t.id === 'fuNext') return void fuApply(FU.setNext(S.followup, t.value), t.value ? '다음 MRI 예정일을 저장했습니다.' : '다음 MRI 예정일을 지웠습니다.');
   if(t.id === 'fuCareOk'){ FUS.careOk = !!t.checked; const keep = fuChecked('data-sym'); fuRender(); document.querySelectorAll('#fuRoot [data-sym]').forEach(x => { if(keep.includes(x.getAttribute('data-sym'))) x.checked = true; }); const ck = fuEl('fuCareOk'); if(ck) ck.focus(); return; }
   if(t.hasAttribute && t.hasAttribute('data-sym')){

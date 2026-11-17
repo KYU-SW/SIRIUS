@@ -6,7 +6,7 @@ import { webcrypto } from 'node:crypto';
 
 /* store.js 의 kdf/seal/unseal 과 vf-core.js, vf-file.js 를 실제 코드 그대로 실행합니다. 합성 데이터만 사용합니다. */
 const ctx = vm.createContext({ crypto: webcrypto, btoa, atob, TextEncoder, TextDecoder, localStorage: { getItem(){ throw new Error('저장소 사용 금지'); }, setItem(){ throw new Error('저장소 사용 금지'); } } });
-for(const f of ['store.js', 'vf-core.js', 'vf-file.js']) vm.runInContext(readFileSync(new URL('../js/' + f, import.meta.url), 'utf8'), ctx);
+for(const f of ['store.js', 'vf-map.js', 'vf-core.js', 'vf-file.js']) vm.runInContext(readFileSync(new URL('../js/' + f, import.meta.url), 'utf8'), ctx);
 const VF = vm.runInContext('VF', ctx), VFFile = vm.runInContext('VFFile', ctx);
 const J = v => JSON.parse(JSON.stringify(v));
 

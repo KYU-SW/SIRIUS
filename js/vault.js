@@ -10,7 +10,7 @@ async function saveVault(){
   const expected = JSON.stringify(account);
   const stale = () => seq !== vaultWriteSeq || S.acc !== account || S.masterKey !== key;
   try{
-    const box = await seal(key, {email:S.email, name:S.name, scans:S.scans, followup:S.followup || null});
+    const box = await seal(key, {email:S.email, name:S.name, scans:S.scans, followup:S.followup || null, vf:S.vf || null});
     if(stale()) return {ok:false, cancelled:true};
     const next = {...account, data:box};
     let result;

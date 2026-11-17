@@ -6,7 +6,7 @@ import {webcrypto} from 'node:crypto';
 
 const ctx=vm.createContext({crypto:webcrypto,btoa,atob,TextEncoder,TextDecoder,
   localStorage:{getItem(){throw Error('No storage');},setItem(){throw Error('No storage');}}});
-for(const file of ['store.js','vf-core.js','vf-file.js','followup-core.js','followup-file.js'])
+for(const file of ['store.js','vf-map.js','vf-core.js','vf-file.js','followup-core.js','followup-file.js'])
   vm.runInContext(readFileSync(new URL('../js/'+file,import.meta.url),'utf8'),ctx);
 const FU=vm.runInContext('FU',ctx), File=vm.runInContext('FUFile',ctx);
 const PASS='Synthetic-backup-passphrase!123';

@@ -336,7 +336,7 @@ $('dlRec').onclick = () => {
   const txt = `뇌 MRI 읽어주기 — 복구 키\n아이디: ${flow.id}\n복구 키: ${$('recKey').textContent}\n발급일: ${new Date().toLocaleString('ko-KR')}\n\n이 키는 비밀번호를 잊었을 때 검사 기록을 되살리는 유일한 수단입니다.\n안전한 곳에 보관하세요.`;
   const url = URL.createObjectURL(new Blob([txt], {type:'text/plain;charset=utf-8'}));
   const a = document.createElement('a');
-  a.href = url; a.download = 'mri-reader-복구키.txt'; a.click();
+  a.href = url; a.download = 'sirius-복구키.txt'; a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
 };
 $('btnRecDone').onclick = async () => {
@@ -363,7 +363,7 @@ function attempts(){
   return at;
 }
 /* ── 로그인 2단계: 비밀번호 확인 → 이메일 인증번호 ────────────────── */
-const pending = { followup:null, acc:null, raw:null, key:null, email:'', name:'', scans:[], resendAt:0, tid:null, sent:false };
+const pending = { followup:null, vf:null, acc:null, raw:null, key:null, email:'', name:'', scans:[], resendAt:0, tid:null, sent:false };
 
 function loginStep(stage){            // 'password' | 'code'
   const code = stage === 'code';
@@ -375,7 +375,7 @@ function loginStep(stage){            // 'password' | 'code'
 }
 function clearPending(){
   authEpoch++;
-  pending.followup = null;
+  pending.followup = null; pending.vf = null;
   clearInterval(pending.tid); pending.tid = null;
   pending.acc = pending.raw = pending.key = null;
   pending.email = ''; pending.name = ''; pending.scans = []; pending.sent = false;
@@ -429,6 +429,7 @@ $('btnLogin').onclick = async () => {
     if(JSON.stringify(accounts.byId(acc.id)) !== snapshot) throw new Error('changed');
     ls.del(LKEY);
     pending.followup = data.followup || null;
+    pending.vf = data.vf || null;                         // 정밀 시야 기록 (없으면 예전 계정)
 
     // 비밀번호는 맞았습니다. 아직 들여보내지 않고 이메일 인증을 한 번 더 받습니다.
     pending.acc = acc; pending.raw = raw; pending.key = key;
@@ -456,6 +457,7 @@ function finishLogin(){
   if(!pending.acc || !pending.key) return;
   S.followup = typeof FU !== 'undefined' ? FU.clean(pending.followup) : pending.followup;
   pending.followup = null;
+  S.vf = pending.vf; pending.vf = null;                   // 검증은 vfLoadSession()(VF.cleanState)이 합니다
   S.acc = pending.acc; S.masterRaw = pending.raw; S.masterKey = pending.key;
   S.email = pending.email; S.name = pending.name || ''; S.scans = pending.scans; S.guest = false;
   clearInterval(pending.tid); pending.tid = null;

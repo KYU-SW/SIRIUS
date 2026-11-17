@@ -15,6 +15,7 @@ function enterApp(){
   if(typeof renderAccount === 'function') renderAccount();
   document.querySelectorAll('.navitem').forEach(b => { b.classList.remove('locked'); b.title = ''; });
   if(typeof followupEnter === 'function') followupEnter();   // S.followup 정제 + 경과 관찰 화면 준비
+  if(typeof vfLoadSession === 'function') vfLoadSession();   // S.vf(계정 금고의 시야 기록) 검증 → 시야 기록 화면
   if(typeof go === 'function') go('followup');                // 로그인 뒤 홈은 경과 관찰
   $('lockBtn').textContent = '로그아웃';
   $('secMode').textContent = '로그아웃하면 이 기기에서도 내용을 읽을 수 없습니다.';
@@ -30,7 +31,7 @@ function logout(){
   if(S.src && typeof S.src.getContext === 'function'){ S.src.width = 0; S.src.height = 0; }
   if(S.img && typeof S.img.removeAttribute === 'function') S.img.removeAttribute('src');
   S.acc = null; S.masterRaw = null; S.masterKey = null; S.email = ''; S.name = '';
-  S.scans = []; S.img = null; S.src = null; S.analysis = null; S.regions = []; S.guest = false; S.followup = null;
+  S.scans = []; S.img = null; S.src = null; S.analysis = null; S.regions = []; S.guest = false; S.followup = null; S.vf = null;
   flow.purpose = null; flow.id = ''; flow.email = ''; flow.pw = ''; flow.acc = null; flow.recoveryReturn = false;
   if(typeof followupReset === 'function') followupReset();   // 경과 관찰 기록·검사 중 화면·타이머·저장 결과 콜백을 모두 정리
   if(typeof vfReset === 'function') vfReset();   // 시야 기록·검사 중인 화면·파일 비밀번호 입력값을 모두 지움

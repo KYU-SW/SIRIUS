@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 /* 합성 데이터만 사용합니다. 실제 환자 정보·영상·기록은 쓰지 않습니다. */
 const ctx = vm.createContext({});
-vm.runInContext(readFileSync(new URL('../js/vf-core.js', import.meta.url), 'utf8'), ctx);
+for(const f of ['vf-map.js', 'vf-core.js']) vm.runInContext(readFileSync(new URL('../js/' + f, import.meta.url), 'utf8'), ctx);
 const VF = vm.runInContext('VF', ctx);
 const J = v => JSON.parse(JSON.stringify(v));
 
@@ -212,7 +212,8 @@ test('증상: 응급 항목은 4단계, 긴급 항목은 3단계이고 14일 지
 test('기준값은 범위 안으로만 조정된다', () => {
   const r = J(VF.sanitizeRules({ pointDrop: 999, clusterMin: -4, centralDrop: 'x', evil: 1 }));
   assert.equal(r.pointDrop, 15); assert.equal(r.clusterMin, 2); assert.equal(r.centralDrop, 3);
-  assert.equal(Object.keys(r).length, 6);
+  assert.equal(Object.keys(r).length, 8);                // focusDrop·focusMin(집중 구역 임시 기준) 포함
+  assert.equal(r.focusDrop, 6); assert.equal(r.focusMin, 2);
 });
 
 /* ── 가져오기 검증 ───────────────────────────────────────── */
