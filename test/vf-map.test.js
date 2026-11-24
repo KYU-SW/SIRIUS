@@ -135,7 +135,7 @@ test('귀쪽−코쪽은 좌우 짝으로 계산한다', () => {
   const f = VF.analyzeEye('R', tests).latest;
   assert.equal(f.dTN, -6); assert.ok(f.reasons.includes('temporal'));
 });
-test('집중 구역: 평균을 따로 내고, 집중 점 2개 이상이 6점 이상 낮으면 임시 변화 사유(focus)', () => {
+test('집중 구역: 평균을 따로 내고, 집중 점 2개 이상이 기준(6점과 개인 흔들림 2×SD 중 큰 값) 이상 낮으면 변화 사유(focus)', () => {
   const map = M.mapById('sellar-mid-v1', 'R');
   const zone = map.points.map((p, i) => p.zone ? i : -1).filter(i => i >= 0);
   const drop = k => (p, i) => zone.slice(0, k).includes(i) ? 18 : 24;
@@ -153,7 +153,7 @@ test('집중 구역: 평균을 따로 내고, 집중 점 2개 이상이 6점 이
   assert.ok(c.latest.reasons.includes('focus'));
   assert.equal(VF.analyzeEye('R', [rec('R', 'base-v1', flat, day(0)), rec('R', 'base-v1', flat, day(1)), rec('R', 'base-v1', flat, day(2))]).latest.dFocus, null);
   const sum = VF.buildSummary({ tests:[...base, rec('R', 'sellar-mid-v1', drop(2), day(2))], symptoms:[] }).lines.join('\n');
-  assert.match(sum, /sellar-mid-v1/); assert.match(sum, /집중 구역/); assert.match(sum, /임시 변화 사유/); assert.match(sum, /앱 점수/);
+  assert.match(sum, /sellar-mid-v1/); assert.match(sum, /집중 구역/); assert.match(sum, /변화 사유: 집중 구역/); assert.doesNotMatch(sum, /임시/); assert.match(sum, /앱 점수/);
   assert.doesNotMatch(sum, / dB\b(?! 와)/);
 });
 test('검사 지도로 실제 검사를 끝까지 돌리면 mapId·점 목록과 같은 길이의 결과가 나온다', () => {
@@ -243,7 +243,9 @@ test('경과 관찰: 치우친 쪽(side) 입력 — 예전 기록은 unknown, �
 test('경과 관찰: 안장결절은 정밀 시야검사를 먼저 권하고 간단 시야(vf4)는 빠른 확인용으로 남긴다', () => {
   const c = FU.setupFor('sellar');
   assert.equal(c.precise, true); assert.ok(c.core.includes('vf4'));
-  for(const loc of ['cavernous', 'olfactory', 'parasagittal', 'convexity', 'cpa', 'unknown']) assert.equal(FU.setupFor(loc).precise, false);
+  for(const loc of ['olfactory', 'parasagittal', 'convexity', 'cpa']) assert.equal(FU.setupFor(loc).precise, false);
+  assert.equal(FU.setupFor('unknown').precise, true, '위치를 모르면 정밀 시야 + 빠르게 두드리기');
+  assert.equal(FU.setupFor('cavernous').precise, true); assert.equal(FU.setupFor('cavernous').preciseOptional, true, '해면정맥동은 정밀 시야를 선택으로');
 });
 test('경과 관찰: 정밀 시야 요약(평균·귀쪽−코쪽·집중 구역 변화·mapId)이 진료 요약과 MRI 그래프에 들어간다', () => {
   const map = M.mapById('sellar-mid-v1', 'R'), zone = map.points.map((p, i) => p.zone ? i : -1).filter(i => i >= 0);
@@ -255,7 +257,7 @@ test('경과 관찰: 정밀 시야 요약(평균·귀쪽−코쪽·집중 구역
   assert.equal(sum.vf.length, 1);
   const line = sum.vfLines[0];
   assert.match(line, /sellar-mid-v1/); assert.match(line, /평균 [+−-]/); assert.match(line, /귀쪽−코쪽 변화/); assert.match(line, /집중 구역 변화 -8/);
-  assert.match(line, /집중 구역 점 하락\(임시 기준\)/);
+  assert.match(line, /집중 구역 점 하락/); assert.doesNotMatch(line, /임시/);
   const g = FU.graph(st, { vf });
   assert.deepEqual(J(g.panels.map(p => p.id)), ['mri', 'vfx']);
   const vfx = g.panels.find(p => p.id === 'vfx');
@@ -266,4 +268,53 @@ test('경과 관찰: 정밀 시야 요약(평균·귀쪽−코쪽·집중 구역
   assert.equal(evil.length, 1); assert.equal(evil[0].state, 'none'); assert.equal(evil[0].zoneKo, ''); assert.deepEqual(J(evil[0].pts), []);
   assert.deepEqual(J(evil[0].latest.reasons), ['focus']);
   assert.deepEqual(J(FU.graph(st).panels.map(p => p.id)), ['mri'], '시야 기록이 없으면 패널도 없음');
+});
+
+/* ── 2차 수정: 기기 정보·같은 곳 확정·개인 흔들림 기준 ───────────── */
+const devA = { cardPx:320, sw:1440, sh:900, dpr:2 }, devB = { cardPx:400, sw:1920, sh:1080, dpr:1 };
+const withDev = (r, dev) => Object.assign(r, { dev });
+test('기기 정보: 카드 보정값이 3% 넘게 다르거나 화면 크기가 다르면 새 기준선, 기기 정보 없는 예전 기록은 같은 기기로 본다', () => {
+  assert.equal(VF.sameDev(devA, { ...devA, cardPx:328 }), true, '2.5% 차이는 같은 기기');
+  assert.equal(VF.sameDev(devA, { ...devA, cardPx:335 }), false, '4.5% 차이는 다른 기기');
+  assert.equal(VF.sameDev(devA, { ...devA, sw:900, sh:1440 }), true, '회전은 같은 화면');
+  assert.equal(VF.sameDev(devA, devB), false); assert.equal(VF.sameDev(null, devB), true);
+  const tests = [withDev(rec('R', 'base-v1', flat, day(0)), devA), withDev(rec('R', 'base-v1', flat, day(1)), devA), withDev(rec('R', 'base-v1', flat, day(2)), devA)];
+  assert.equal(VF.analyzeEye('R', tests).state, 'stable');
+  tests.push(withDev(rec('R', 'base-v1', () => 14, day(3)), devB));          // 다른 노트북: 값이 낮아도 '변화'가 아니라 새 기준선
+  const a = VF.analyzeEye('R', tests);
+  assert.equal(a.state, 'baseline'); assert.equal(a.devBreak, true); assert.equal(a.otherMap, 3);
+  const old = [rec('R', 'base-v1', flat, day(0)), rec('R', 'base-v1', flat, day(1)), withDev(rec('R', 'base-v1', flat, day(2)), devA)];
+  assert.equal(VF.analyzeEye('R', old).state, 'stable', '예전 기록(기기 정보 없음)과 이어서 비교');
+  /* 가져오기: 기기 정보는 숫자만, 잘못되면 버림, 내보내기 왕복 유지 */
+  const st = VF.cleanState(J(VF.exportable({ tests:[withDev(rec('R', 'base-v1', flat, day(0)), devA), withDev(rec('R', 'base-v1', flat, day(1)), { cardPx:'<b>', sw:1, sh:1 })], symptoms:[], rules:VF.RULES_DEFAULT })));
+  assert.deepEqual(J(st.tests[0].dev), devA); assert.equal(st.tests[1].dev, undefined);
+  assert.deepEqual(J(VF.cleanState(J(VF.exportable(st)))), J(st));
+});
+test('고정 손실(맹점 반응) 기준은 20%: 3/10 은 신뢰도 낮음, 2/10 은 통과', () => {
+  const r = o => ({ fp:0, fpN:20, fl:0, flN:10, fn:0, fnN:5, ...o });
+  assert.equal(VF.REL.fl, 0.20);
+  assert.equal(VF.isReliable(r({ fl:2 })), true); assert.equal(VF.isReliable(r({ fl:3 })), false);
+  assert.deepEqual(J(VF.relProblems(r({ fl:3 }))), ['fl']);
+});
+test('2번 연속 나빠져도 서로 다른 곳이면 확정(confirmed)하지 않고 재검(recheck)으로 둔다', () => {
+  const map = M.mapById('base-v1', 'R'), g = map.points;
+  const far = (cx, cy) => (p) => Math.hypot(p.x - cx, p.y - cy) <= 7 ? 12 : 24;   // 한 곳 주변만 크게 낮춤
+  const up = g.find(p => p.y > 0 && p.x > 10), dn = g.find(p => p.y < 0 && p.x < -10);
+  const base = [rec('R', 'base-v1', flat, day(0)), rec('R', 'base-v1', flat, day(1))];
+  const diff = VF.analyzeEye('R', [...base, rec('R', 'base-v1', far(up.x, up.y), day(2)), rec('R', 'base-v1', far(dn.x, dn.y), day(3))]);
+  assert.ok(diff.follow[0].worse && diff.follow[1].worse);
+  assert.equal(diff.state, 'recheck', '다른 곳 → 확정 아님');
+  const same = VF.analyzeEye('R', [...base, rec('R', 'base-v1', far(up.x, up.y), day(2)), rec('R', 'base-v1', far(up.x, up.y), day(3))]);
+  assert.equal(same.state, 'confirmed', '같은 곳 → 확정');
+});
+test('개인 흔들림: 집중 구역 기준도 2×SD 를 따르고, 흔들림이 12점을 넘으면 불안정(상한으로 감추지 않음)', () => {
+  const map = M.mapById('sellar-mid-v1', 'R'), zone = map.points.map((p, i) => p.zone ? i : -1).filter(i => i >= 0);
+  const noisy = [rec('R', 'sellar-mid-v1', (p, i) => i % 2 ? 28 : 18, day(0)), rec('R', 'sellar-mid-v1', (p, i) => i % 2 ? 18 : 28, day(1))];   // 점마다 10점 흔들림
+  const a = VF.analyzeEye('R', [...noisy, rec('R', 'sellar-mid-v1', (p, i) => zone.includes(i) ? 16 : 23, day(2))]);
+  assert.ok(a.baseline.focusThr > 6, '흔들림이 큰 사람은 집중 구역 기준도 커짐');
+  assert.ok(!a.latest.reasons.includes('focus'), '7점 하락은 이 사람에게는 흔들림 안');
+  assert.equal(a.unstable, true); assert.ok(a.baseline.pointThr > 12, '상한 12에서 멈추지 않음');
+  assert.match(VF.buildSummary({ tests:a ? [...noisy] .concat([rec('R', 'sellar-mid-v1', flat, day(2))]) : [], symptoms:[] }).lines.join('\n'), /기준선을 다시 만들어/);
+  const calm = VF.analyzeEye('R', [rec('R', 'sellar-mid-v1', flat, day(0)), rec('R', 'sellar-mid-v1', flat, day(1)), rec('R', 'sellar-mid-v1', flat, day(2))]);
+  assert.equal(calm.unstable, false); assert.equal(calm.baseline.focusThr, 6);
 });

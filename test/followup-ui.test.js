@@ -87,8 +87,9 @@ test('종양 정보 입력: 잘못된 값은 오류를 보이고 저장하지 �
   addMriViaUi(t, '2026-01-01', '18,5'); await t.flush();
   assert.equal(t.state().mri[0].size, 18.5); assert.equal(t.saves, 1);
   assert.match(t.html(), /18\.5 mm/); assert.match(t.node('fuSave').innerHTML, /암호화해 이 브라우저에 저장/);
-  t.change('fuLoc', 'cpa'); assert.equal(t.state().loc, 'cpa'); assert.match(t.html(), /청력 기록/);
-  t.change('fuLoc', 'olfactory'); assert.match(t.html(), /후각 기록/);
+  t.change('fuLoc', 'cpa'); assert.equal(t.state().loc, 'cpa'); assert.match(t.html(), /박자 두드리기/); assert.doesNotMatch(t.html(), /청력 기록|data-v="hear"/);
+  t.change('fuLoc', 'olfactory'); assert.doesNotMatch(t.html(), /후각 기록|data-v="smell"/, '후각·청력 검사는 새로 권하지 않음');
+  t.change('fuHand', 'left'); assert.equal(t.state().hand, 'left'); t.change('fuHand', 'both'); assert.equal(t.state().hand, 'left'); assert.match(t.html(), /목록에서 골라/);
   t.change('fuLoc', '<bad>'); assert.equal(t.state().loc, 'olfactory'); assert.match(t.html(), /목록에서 골라/);
   t.change('fuNext', '2027-01-01'); assert.equal(t.state().next, '2027-01-01');
   t.change('fuNext', '2027-99-99'); assert.equal(t.state().next, '2027-01-01'); assert.match(t.html(), /날짜로 입력/);
@@ -139,29 +140,54 @@ test('followupReset: 기록·화면·진행 중인 검사와 타이머·소리�
   t.enter(); assert.match(t.html(), /내 종양 정보/); assert.equal(t.state().mri.length, 0, '다시 들어오면 이전 기록이 남아 있지 않음');
 });
 
-test('두드리기 검사: 3초 준비 → 왼손 10초 → 오른손 10초, 결과 확인 뒤 기록하면 저장된다', async () => {
-  const t = build(); t.enter();
-  t.press('go', { v:'tapIntro' }); t.press('tapStart');
-  assert.equal(t.node('fuStage').hidden, false);
-  for(const hand of ['왼손', '오른손']){
-    assert.match(t.node('fuStageMsg').textContent, new RegExp(hand));
-    t.node('fuStageGo').h.click();
-    t.advance(3000);
-    assert.equal(t.ev('FUS.test.phase'), 'run'); assert.equal(t.node('fuTapPad').hidden, false);
-    for(let i = 0; i < 7; i++){ t.advance(200); t.node('fuTapPad').h.pointerdown({ preventDefault(){} }); }
-    assert.equal(t.node('fuStageCount').textContent, '7회');
-    t.advance(10000);
+/* 빠르게 두드리기 한 번 전체: 손마다 [시작] → 3초 → 10초, 같은 손 2·3번째는 5초 쉬고 자동 시작. counts = [[왼손 3개], [오른손 3개]] */
+function runTap(t, counts){
+  for(const hand of counts){
+    for(let k = 0; k < hand.length; k++){
+      if(k === 0) t.node('fuStageGo').h.click(); else t.advance(5000);
+      t.advance(3000);
+      assert.equal(t.ev('FUS.test.phase'), 'run');
+      for(let i = 0; i < hand[k]; i++){ t.advance(100); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); }
+      t.advance(10000);
+    }
   }
+}
+test('빠르게 두드리기: 스페이스바로 손마다 10초 × 3번(사이 5초), 평균을 기록하고 처음 2번 평균이 기준점, 줄어들 때만 변화', async () => {
+  const t = build(); t.enter();
+  t.press('go', { v:'tapIntro' }); assert.match(t.html(), /스페이스바/); t.press('tapStart');
+  assert.equal(t.node('fuStage').hidden, false); assert.match(t.node('fuStageMsg').textContent, /왼손 1\/3번째/);
+  t.node('fuStageGo').h.click(); t.advance(3000);
+  assert.equal(t.node('fuTapPad').hidden, true, '화면 패드는 쓰지 않음');
+  for(let i = 0; i < 7; i++){ t.advance(200); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); }
+  assert.equal(t.node('fuStageCount').textContent, '7회');
+  t.node('fuTapPad').h.pointerdown({ preventDefault(){} }); assert.equal(t.ev('FUS.test.times.length'), 7, '화면 누르기는 세지 않음');
+  t.advance(10000);
+  assert.equal(t.ev('FUS.test.phase'), 'rest'); assert.match(t.node('fuStageMsg').textContent, /쉬세요[^]*왼손 2\/3번째/);
+  t.advance(5000 + 3000); assert.equal(t.ev('FUS.test.phase'), 'run', '쉰 뒤 자동으로 다음 회차');
+  for(let i = 0; i < 9; i++){ t.advance(100); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); } t.advance(10000);
+  t.advance(8000); for(let i = 0; i < 8; i++){ t.advance(100); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); } t.advance(10000);
+  assert.match(t.node('fuStageMsg').textContent, /오른손 1\/3번째/);
+  runTap(t, [[8, 8, 8]]);
   assert.equal(t.node('fuStage').hidden, true); assert.equal(t.timers, 0);
-  assert.match(t.html(), /두드리기 결과/); assert.match(t.html(), /좌우 차이/);
+  assert.match(t.html(), /빠르게 두드리기 결과/); assert.match(t.html(), /좌우 차이/);
   t.press('saveTap'); await t.flush();
   const c = t.state().checks[0];
-  assert.equal(c.type, 'tap'); assert.equal(c.L.n, 7); assert.equal(c.R.n, 7); assert.equal(c.L.cv, 0);
-  assert.equal(c.date, TODAY_REAL); assert.match(t.html(), /기준점 기록됨/);
-  t.press('go', { v:'tapIntro' }); t.press('tapStart');   // 두 번째 기록: 비교
-  for(let h = 0; h < 2; h++){ t.node('fuStageGo').h.click(); t.advance(3000); for(let i = 0; i < 3; i++){ t.advance(200); t.node('fuTapPad').h.pointerdown({ preventDefault(){} }); } t.advance(10000); }
-  t.press('saveTap'); await t.flush();
+  assert.equal(c.type, 'tap'); assert.equal(c.L.n, 8); assert.equal(c.R.n, 8); same(c.trials, { L:[7, 9, 8], R:[8, 8, 8] }); assert.equal(c.input, 'space');
+  assert.equal(c.date, TODAY_REAL); assert.match(t.html(), /기준점 만드는 중 1\/2/);
+  t.press('go', { v:'tapIntro' }); t.press('tapStart'); runTap(t, [[8, 8, 8], [8, 8, 8]]); t.press('saveTap'); await t.flush();
+  assert.match(t.html(), /기준점 완료/);
+  t.press('go', { v:'tapIntro' }); t.press('tapStart'); runTap(t, [[12, 12, 12], [12, 12, 12]]); t.press('saveTap'); await t.flush();
+  assert.match(t.html(), /비슷함/, '빨라진 것은 변화가 아님'); assert.doesNotMatch(t.html(), /변화 있음/);
+  t.press('go', { v:'tapIntro' }); t.press('tapStart'); runTap(t, [[3, 3, 3], [8, 8, 8]]); t.press('saveTap'); await t.flush();
   assert.match(t.html(), /변화 있음/);
+});
+test('빠르게 두드리기: 10초에 70회를 넘으면 그 회차를 저장하지 않고 다시 한다', () => {
+  const t = build(); t.enter(); t.press('tapStart');
+  t.node('fuStageGo').h.click(); t.advance(3000);
+  for(let i = 0; i < 71; i++){ t.advance(100); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); }
+  t.advance(10000);
+  assert.equal(t.ev('FUS.test.phase'), 'ready'); assert.match(t.node('fuStageMsg').textContent, /71회[^]*다시[^]*왼손 1\/3번째/);
+  assert.equal(t.ev('FUS.test.res.L.length'), 0);
 });
 
 test('두드리기 도중 10초 밖 입력과 준비 시간 입력은 세지 않는다', () => {
@@ -169,7 +195,7 @@ test('두드리기 도중 10초 밖 입력과 준비 시간 입력은 세지 않
   t.node('fuStageGo').h.click(); t.advance(1000);
   t.ev('fuPress()');                                      // 준비 중
   assert.equal(t.ev('FUS.test.times.length'), 0);
-  t.advance(2000); t.advance(300); t.node('fuTapPad').h.pointerdown({ preventDefault(){} });
+  t.advance(2000); t.advance(300); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} });
   assert.equal(t.ev('FUS.test.times.length'), 1);
 });
 
@@ -247,15 +273,12 @@ test('증상 기록: 응급 항목을 체크하면 119 안내가 나오고, 보�
   t.press('go', { v:'summary' }); assert.match(t.html(), /응급 항목을 체크한 기록이 있습니다/);
 });
 
-test('후각·청력·보호자·약 기록 입력 검증과 저장', async () => {
-  const t = build(); t.enter();
-  t.press('go', { v:'smell' }); t.press('saveLevel', { kind:'smell' }); assert.match(t.html(), /모두 골라/);
-  t.q['input[name="fusmellL"]:checked'] = { value:'2' }; t.q['input[name="fusmellR"]:checked'] = { value:'1' }; t.node('fuDate').value = '2026-01-01';
-  t.press('saveLevel', { kind:'smell' }); await t.flush();
-  same([t.state().checks[0].L, t.state().checks[0].R], [2, 1]);
-  t.press('go', { v:'hear' }); assert.match(t.html(), /소리를 아주 작게/); assert.match(t.html(), /data-s="L"/);
-  t.q['input[name="fuhearL"]:checked'] = { value:'9' }; t.q['input[name="fuhearR"]:checked'] = { value:'1' }; t.node('fuDate').value = '2026-01-01';
-  t.press('saveLevel', { kind:'hear' }); assert.match(t.html(), /올바르지 않습니다/);
+test('후각·청력 검사 화면은 없고(예전 기록은 읽음), 보호자·약 기록 입력 검증과 저장', async () => {
+  const t = build(); t.enter({ v:1, checks:[{ type:'smell', date:'2026-01-01', L:2, R:1 }, { type:'hear', date:'2026-01-01', L:2, R:2 }] });
+  assert.equal(t.state().checks.length, 2, '예전 후각·청력 기록은 그대로 불러옴'); assert.match(t.html(), /후각 기록\(예전 기록\)/);
+  t.press('go', { v:'smell' }); assert.match(t.html(), /내 종양 정보/, '예전 화면 주소는 홈으로'); assert.doesNotMatch(t.html(), /fusmellL/);
+  t.press('go', { v:'hear' }); assert.doesNotMatch(t.html(), /소리를 아주 작게|data-s="L"/);
+  t.press('saveLevel', { kind:'smell' }); assert.equal(t.state().checks.length, 2);
   t.press('go', { v:'care' }); t.node('fuDate').value = '2026-02-01'; t.qa['#fuRoot [data-care]'] = [{ checked:true, getAttribute:() => 'seiz' }];
   t.press('saveCare'); await t.flush(); same(t.state().checks.at(-1).items, ['seiz']);
   t.press('go', { v:'meds' }); assert.match(t.html(), /약 사용을 바꾸라는 안내는 하지 않습니다/);
@@ -393,8 +416,8 @@ test('인쇄용 요약: 질문 5개 안에 약·다음 MRI 질문이 남고, 과
   t.change('fuNext', '2027-03-01');
   const symrec = async (d, items) => { t.press('go', { v:'sym' }); t.node('fuDate').value = d; t.qa['#fuRoot [data-sym]'] = items.map(i => ({ checked:true, getAttribute:() => i })); t.press('saveSym'); await t.flush(); };
   await symrec('2026-01-01', ['em2']); await symrec('2026-02-01', ['vis1']);
-  for(const kind of ['smell', 'hear']) for(const [d, lv] of [['2026-01-01', '2'], ['2026-02-01', '0']]){
-    t.press('go', { v:kind }); t.q[`input[name="fu${kind}L"]:checked`] = { value:lv }; t.q[`input[name="fu${kind}R"]:checked`] = { value:lv }; t.node('fuDate').value = d; t.press('saveLevel', { kind }); await t.flush();
+  for(const e of ['R', 'L']) for(const [d, n] of [['2026-01-01', 3], ['2026-02-01', 0]]){
+    t.ev(`S.followup = FU.addCheck(S.followup, { type:'vf4', date:'${d}', eye:'${e}', seen:{ u:${n}, d:${n}, l:${n}, r:${n} }, catch:{ shown:2, pressed:0 } }, '${TODAY_REAL}').state`);
   }
   t.press('go', { v:'care' }); t.node('fuDate').value = '2026-01-01'; t.qa['#fuRoot [data-care]'] = []; t.press('saveCare'); await t.flush();
   t.press('go', { v:'care' }); t.node('fuDate').value = '2026-02-01'; t.qa['#fuRoot [data-care]'] = [{ checked:true, getAttribute:() => 'seiz' }]; t.press('saveCare'); await t.flush();
@@ -721,17 +744,15 @@ test('백업 교체 저장은 더 먼저 시작한 일반 저장의 늦은 결�
   rel[1](); await t.flush(); await t.flush(); assert.equal(t.ev('FUS.save'), 'ok');
 });
 
-test('두드리기·시야 응답은 주 입력(왼쪽 버튼·첫 접점)만 센다: 우클릭·보조 버튼·두 번째 손가락·이어지는 키 반복은 무시', () => {
+test('두드리기는 스페이스바만 세고(화면·마우스·키 반복 무시), 시야 응답은 주 입력(왼쪽 버튼·첫 접점)만 센다', () => {
   const t = build(); t.enter(); t.press('go', { v:'tapIntro' }); t.press('tapStart'); t.node('fuStageGo').h.click(); t.advance(3100);
   assert.equal(t.ev('FUS.test.phase'), 'run');
   const down = (o = {}) => t.node('fuTapPad').h.pointerdown({ preventDefault(){}, ...o });
   const n = () => t.ev('FUS.test.times.length');
-  t.advance(100); down(); assert.equal(n(), 1, '일반 입력(button 0, 이벤트 필드 없음 포함)은 셈');
-  down({ button:0, isPrimary:true, pointerType:'touch' }); assert.equal(n(), 2);
-  down({ button:2 }); down({ button:1 }); assert.equal(n(), 2, '우클릭·가운데 버튼 무시');
-  down({ button:0, isPrimary:false, pointerType:'touch' }); assert.equal(n(), 2, '두 번째 손가락 무시');
-  t.docH.keydown({ key:' ', code:'Space', repeat:true, preventDefault(){} }); assert.equal(n(), 2, '키 반복 무시(기존)');
-  t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); assert.equal(n(), 3, '키보드 Space 는 계속 셈');
+  t.advance(100); down(); down({ button:0, isPrimary:true, pointerType:'touch' }); assert.equal(n(), 0, '화면·마우스 입력은 세지 않음(입력 방법 통일)');
+  t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); assert.equal(n(), 1, '스페이스바는 셈');
+  t.docH.keydown({ key:' ', code:'Space', repeat:true, preventDefault(){} }); assert.equal(n(), 1, '키 반복 무시');
+  t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); assert.equal(n(), 2);
   // 시야 응답
   t.ev('fuCancelTest()'); t.node('fuField').getBoundingClientRect = () => ({ width:600 });
   t.press('go', { v:'vfIntro' }); t.q['input[name="fuEye"]:checked'] = { value:'R' }; t.press('vfStart'); t.node('fuStageGo').h.click();
@@ -757,4 +778,48 @@ test('요약 복사: 클립보드 await 뒤 로그아웃·재로그인·다른 �
   const g2 = mk(), t2 = build(); t2.enter(); t2.ctx.navigator.clipboard.writeText = async () => { await g2.p; };   // 정상 흐름은 유지
   t2.press('go', { v:'summary' }); t2.press('exportAsk'); t2.press('exportCopy'); g2.r(); await t2.flush(); await t2.flush();
   assert.match(t2.html(), /요약을 복사했습니다/);
+});
+
+/* 박자 두드리기: 연습 → 왼손 → 오른손. ivs = 각 손의 간격 목록(ms) */
+function runRhythm(t, ivL, ivR, practice = 5){
+  t.node('fuStageGo').h.click(); t.advance(3000);
+  for(let i = 0; i < practice; i++){ t.advance(400); t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); }
+  t.advance(10000);
+  for(const ivs of [ivL, ivR]){
+    t.node('fuStageGo').h.click(); t.advance(3000);
+    let used = 0;
+    t.docH.keydown({ key:' ', code:'Space', preventDefault(){} });
+    for(const d of ivs){ t.advance(d); used += d; t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); }
+    t.advance(20000 - used + 1);
+  }
+}
+test('박자 두드리기: 연습(기록 안 함) → 왼손 20초 → 오른손 20초, 흔들림을 기록하고 기준값 전에는 "기준 만드는 중"', async () => {
+  const t = build(); t.enter();
+  t.change('fuLoc', 'cpa'); t.change('fuSide', 'right');
+  assert.match(t.html(), /박자 두드리기/); assert.match(t.html(), /주의할 손: <b>오른손<\/b>\(종양 같은 쪽 손\)/);
+  t.press('go', { v:'rhythmIntro' }); assert.match(t.html(), /편한 속도로, 같은 박자/); assert.doesNotMatch(t.html(), /규칙적으로 눌러/);
+  t.press('rhythmStart'); assert.match(t.node('fuStageMsg').textContent, /연습\(기록하지 않음\)/);
+  const steady = Array(30).fill(500), wob = Array.from({ length:30 }, (_, i) => i % 2 ? 430 : 570);
+  runRhythm(t, steady, wob);
+  assert.equal(t.node('fuStage').hidden, true); assert.match(t.html(), /박자 두드리기 결과/);
+  const d = t.ev('FUS.draft'); assert.equal(d.L.cv, 0); assert.ok(d.R.cv > 10); assert.equal(d.L.valid, true);
+  t.press('saveRhythm'); await t.flush();
+  assert.equal(t.state().checks[0].type, 'rhythm'); assert.equal(t.state().checks[0].input, 'space');
+  for(let k = 0; k < 2; k++){ t.press('go', { v:'rhythmIntro' }); t.press('rhythmStart'); runRhythm(t, steady, steady); t.press('saveRhythm'); await t.flush(); }
+  assert.match(t.html(), /기준 만드는 중/);
+  t.press('go', { v:'summary' }); assert.match(t.html(), /박자 두드리기/); assert.match(t.html(), /주의할 손: 오른손/);
+});
+test('박자 두드리기: 두 번 눌림·멈춤이 많으면 저장 버튼 없이 다시 하게 하고, 마우스·화면 입력은 세지 않는다', async () => {
+  const t = build(); t.enter(); t.press('rhythmStart');
+  const messy = [...Array(5).fill(500), ...Array(15).fill(500), 80, 1500, 80, 1500, 80, 1500];
+  t.node('fuStageGo').h.click(); t.advance(3000); t.advance(10000);
+  t.node('fuStageGo').h.click(); t.advance(3000);
+  t.node('fuTapPad').h.pointerdown({ preventDefault(){} }); assert.equal(t.ev('FUS.test.times.length'), 0);
+  t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); let used = 0;
+  for(const d of messy){ t.advance(d); used += d; t.docH.keydown({ key:' ', code:'Space', preventDefault(){} }); }
+  t.advance(20000 - used + 1);
+  t.node('fuStageGo').h.click(); t.advance(3000); t.advance(20001);
+  assert.match(t.html(), /다시 해 주세요/); assert.doesNotMatch(t.html(), /data-fu="saveRhythm"/);
+  t.press('saveRhythm'); await t.flush(); assert.equal(t.state().checks.length, 0);
+  let p = 0; t.winH.beforeunload({ preventDefault(){ p++; } }); assert.equal(p, 1, '저장하지 않은 결과가 있으면 닫기 경고');
 });
