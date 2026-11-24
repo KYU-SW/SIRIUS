@@ -50,7 +50,7 @@ document.addEventListener('visibilitychange', () => { if(document.hidden && FUS.
 /* 저장 실패·저장 중·검사 중·저장하지 않은 결과가 있으면 닫기/새로고침 전에 브라우저 경고를 띄웁니다 */
 function fuUnsaved(){
   if(FUS.dead || !fuLogged()) return false;
-  return FUS.save === 'fail' || FUS.save === 'conflict' || FUS.save === 'unsupported' || FUS.save === 'saving' || FUS.busy || !!FUS.test || (!!FUS.draft && (FUS.view === 'tapDone' || FUS.view === 'vfDone'));
+  return FUS.save === 'fail' || FUS.save === 'conflict' || FUS.save === 'unsupported' || FUS.save === 'saving' || FUS.busy || !!FUS.test || (!!FUS.draft && (FUS.view === 'tapDone' || FUS.view === 'vfDone' || FUS.view === 'rhythmDone'));
 }
 window.addEventListener('beforeunload', e => { if(fuUnsaved()){ e.preventDefault(); e.returnValue = ''; return ''; } });
 
@@ -124,7 +124,8 @@ function fuStatusChip(c){
 }
 function fuStatusChip1(c){
   if(!c) return '<span class="fu-chip fu-none">기준점 없음</span>';
-  if(c.state === 'baseline') return '<span class="fu-chip fu-base">기준점 기록됨</span>';
+  if(c.state === 'baseline') return c.need ? `<span class="fu-chip fu-base">기준점 만드는 중 ${c.n}/2</span>` : c.n === 2 ? '<span class="fu-chip fu-base">기준점 완료 (2회 평균)</span>' : '<span class="fu-chip fu-base">기준점 기록됨</span>';
+  if(c.state === 'building') return '<span class="fu-chip fu-base" title="건강인 반복 측정으로 변화 기준을 정하는 중입니다">기준 만드는 중</span>';
   if(c.state === 'same') return '<span class="fu-chip fu-same">비슷함</span>';
   return `<span class="fu-chip fu-chg">▲ 변화 있음${c.repeated ? ' · 이어짐' : ''}</span>`;
 }
@@ -132,7 +133,7 @@ function fuCmp(type, eye){ const c = FU.compare(S.followup, type, eye); return c
 /* 시야 기록(정밀 시야검사) 결과 요약. 시야 기록 모듈이 없으면(단독 테스트 등) 빈 목록 */
 const fuVfExtra = () => ({ vf: (typeof VF !== 'undefined' && typeof VFS !== 'undefined' && VF.digest) ? VF.digest({ tests:VFS.tests, rules:VFS.rules }) : [] });
 const FU_FIRST_EYE_KO = { left:'왼쪽으로 치우쳐 있어 <b>왼쪽 눈을 먼저</b> 검사하세요.', right:'오른쪽으로 치우쳐 있어 <b>오른쪽 눈을 먼저</b> 검사하세요.' };
-function fuPreciseRow(s){
+function fuPreciseRow(s, optional){
   const vf = FU.cleanVf(fuVfExtra().vf);
   const chip = e => {
     const d = vf.find(x => x.eye === e);
@@ -142,7 +143,7 @@ function fuPreciseRow(s){
     return d.latest ? '<span class="fu-chip fu-same">비슷함</span>' : '<span class="fu-chip fu-base">기준선 완료</span>';
   };
   const first = FU_FIRST_EYE_KO[s.side] || '치우친 쪽을 모르거나 가운데이면 어느 눈부터 해도 됩니다.';
-  return `<li><div><b>정밀 시야검사</b> <span class="fu-rec">권장</span><div class="tiny">‘시야 기록’ 화면에서 한 눈씩 28~34곳의 밝기 역치를 재고 내 기준선과 비교합니다. 위치·치우친 쪽에 맞춘 검사 지도를 씁니다. ${first}</div><div class="fu-chips">${['R', 'L'].map(e => `<span class="fu-eye">${FU_EYE[e]} 눈 ${chip(e)}</span>`).join(' ')}</div></div><button class="btn sm primary" data-fu="field">시작</button></li>`;
+  return `<li><div><b>정밀 시야검사</b> <span class="fu-rec">${optional ? '선택' : '권장'}</span><div class="tiny">‘시야 기록’ 화면에서 한 눈씩 28~34곳의 밝기 역치를 재고 내 기준선과 비교합니다. 위치·치우친 쪽에 맞춘 검사 지도를 씁니다. ${first}</div><div class="fu-chips">${['R', 'L'].map(e => `<span class="fu-eye">${FU_EYE[e]} 눈 ${chip(e)}</span>`).join(' ')}</div></div><button class="btn sm primary" data-fu="field">시작</button></li>`;
 }
 const fuSel = (id, cur, opts) => `<select id="${id}">${opts.map(([v, t]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 /** untilToday=true 이면 오늘까지만 고를 수 있습니다 (촬영일·체크 날짜). false 는 미래 날짜 가능(다음 MRI 예정일). */
@@ -159,8 +160,9 @@ function fuRender(){
   else if(v === 'vfIntro') html = fuVfIntro();
   else if(v === 'vfDone') html = fuVfDone();
   else if(v === 'sym') html = fuSymForm();
-  else if(v === 'smell') html = fuLevelForm('smell');
-  else if(v === 'hear') html = fuLevelForm('hear');
+  else if(v === 'rhythmIntro') html = fuRhythmIntro();
+  else if(v === 'rhythmDone') html = fuRhythmDone();
+  else if(v === 'smell' || v === 'hear'){ FUS.view = 'home'; html = fuHome(); }   // 예전 화면 주소: 새 기록 없음
   else if(v === 'care') html = fuCareForm();
   else if(v === 'meds') html = fuMedsForm();
   else if(v === 'summary') html = fuSummary();
@@ -172,7 +174,7 @@ function fuRender(){
 }
 function fuGo(view){
   if(FUS.busy) return;                                        // 교체 저장 중에는 화면을 옮기지 않음
-  if(view === 'backup' && (FUS.view === 'tapDone' || FUS.view === 'vfDone') && FUS.draft){ FUS.msg = '저장하지 않은 검사 결과가 있습니다. 먼저 저장하거나 버린 뒤 백업·복원을 열어 주세요.'; FUS.msgOk = false; return fuRender(); }
+  if(view === 'backup' && (FUS.view === 'tapDone' || FUS.view === 'vfDone' || FUS.view === 'rhythmDone') && FUS.draft){ FUS.msg = '저장하지 않은 검사 결과가 있습니다. 먼저 저장하거나 버린 뒤 백업·복원을 열어 주세요.'; FUS.msgOk = false; return fuRender(); }
   fuBkClear(); fuAudioStop(); FUS.copyTok++; FUS.view = view; FUS.msg = ''; FUS.delAsk = ''; FUS.exportAsk = false; FUS.copyMsg = ''; if(view !== 'care') FUS.careOk = false; fuRender(); }
 
 function fuHome(){
@@ -186,7 +188,8 @@ function fuHome(){
       : `<button class="btn sm" data-fu="askMri" data-k="${esc(m.date)}" aria-label="${esc(m.date)} MRI 기록 지우기">지우기</button>`;
     return `<tr><td>${esc(m.date)}</td><td>${m.size} mm</td><td>${del}</td></tr>`;
   }).join('');
-  const core = (cfg.precise ? fuPreciseRow(s) : '') + cfg.core.map(t => fuCheckRow(t, true, cfg.precise)).join('');
+  const core = (cfg.precise ? fuPreciseRow(s, cfg.preciseOptional) : '') + cfg.core.map(t => fuCheckRow(t, true, cfg.precise)).join('');
+  const handOpts = FU.HANDS.map(x => [x.id, x.ko]);
   const sideOpts = FU.SIDES.map(x => [x.id, x.ko]);
   const extra = cfg.extra.map(t => fuCheckRow(t, false)).join('');
   const days = s.next ? Math.round(FU.dayNum(s.next) - FU.dayNum(fuToday())) : null;
@@ -197,6 +200,7 @@ function fuHome(){
     <div class="fu-grid">
       <div class="field"><label for="fuLoc">종양 위치</label>${fuSel('fuLoc', s.loc, locOpts)}<span class="help">${esc(FU.LOCS.find(l => l.id === s.loc).hint)}. 위치를 바꾸면 아래 체크 구성이 바뀝니다.</span></div>
       <div class="field"><label for="fuSide">치우친 쪽</label>${fuSel('fuSide', s.side, sideOpts)}<span class="help">판독지 표기: <b>Rt.</b> = 오른쪽, <b>Lt.</b> = 왼쪽, <b>midline</b> = 가운데. 모르면 ‘모름’(가운데와 같은 검사 지도)을 고르세요. ${esc(FU.SIDES.find(x => x.id === s.side).hint)}.</span></div>
+      <div class="field"><label for="fuHand">잘 쓰는 손</label>${fuSel('fuHand', s.hand, handOpts)}<span class="help">두드리기의 좌우 차이를 잘 쓰는 손 기준으로 계산합니다. 보통 잘 쓰는 손이 조금(약 8%) 빠릅니다.</span></div>
       <div class="field"><label for="fuNext">다음 MRI 예정일</label>${fuDateIn('fuNext', s.next)}<span class="help">${esc(s.next ? s.next + nextNote : '아직 모르면 비워 두세요.')}</span></div>
     </div>
     <h4 class="fu-h4">MRI 크기 기록 추가</h4>
@@ -210,7 +214,7 @@ function fuHome(){
   </div></div>
 
   <div class="card"><div class="card-hd"><h3>내 위치에 맞춘 체크</h3><span class="right tiny">${esc(FU.LOCS.find(l => l.id === s.loc).ko)}</span></div><div class="card-pad">
-    <p class="tiny">첫 번째 기록이 <b>기준점</b>이 됩니다. 그 뒤에는 기준점과 비슷한지, 달라졌는지만 보여 주며 좋고 나쁨을 판단하지 않습니다. 앱은 체크 주기를 정하지 않으니 <b>담당 의료진과 정한 간격</b>으로 하세요.</p>
+    <p class="tiny">첫 기록(두드리기는 <b>처음 2번의 평균</b>)이 <b>기준점</b>이 됩니다. 그 뒤에는 기준점보다 나빠진 쪽으로 달라졌는지만 보여 주며 좋고 나쁨을 판단하지 않습니다. 앱은 체크 주기를 정하지 않으니 <b>담당 의료진과 정한 간격</b>으로 하세요.</p>
     <ul class="fu-list">${core}</ul>
     <details class="fu-more"><summary>그 밖에 할 수 있는 체크</summary><ul class="fu-list">${extra}</ul></details>
     <ul class="fu-list fu-list-solo"><li><div><b>약 사용 기록</b><div class="tiny">${esc(FU.HORMONE[s.meds.hormone])}${s.meds.date ? ' · ' + esc(s.meds.date) : ''}</div></div><button class="btn sm" data-fu="go" data-v="meds">기록하기</button></li></ul>
@@ -230,25 +234,40 @@ function fuHome(){
     <span class="tiny">요약에는 의사에게 할 질문과 응급 안내가 들어 있습니다.</span>
   </div></div>`;
 }
+const FU_WATCH_KO = { tap:'종양 반대쪽 손', rhythm:'종양 같은 쪽 손' };
+function fuWatchNote(type){
+  const w = FU.watchHand(S.followup, type);
+  return w ? ` 주의할 손: <b>${FU_HAND[w]}</b>(${FU_WATCH_KO[type]}).` : '';
+}
 function fuCheckRow(type, core, quick){
   const c = type === 'vf4' ? null : fuCmp(type);
   let chips;
   if(type === 'vf4'){ chips = ['R', 'L'].map(e => `<span class="fu-eye">${FU_EYE[e]} 눈 ${fuStatusChip(fuCmp('vf4', e))}</span>`).join(' '); }
   else chips = fuStatusChip(c);
   const desc = {
-    tap:'왼손·오른손을 10초씩 두드린 횟수와 리듬, 좌우 차이를 기록합니다.',
+    tap:'스페이스바를 검지로 10초 동안 최대한 빠르게 누릅니다. 손마다 3번 해서 평균을 기록합니다.',
+    rhythm:'스페이스바를 편한 속도로 20초 동안 같은 박자를 유지하며 누릅니다. 박자가 얼마나 일정한지 기록합니다.',
     vf4:quick ? '빠른 확인용(약 1분): 한 눈씩 위·아래·왼쪽·오른쪽 빛에 반응합니다. 정밀 시야검사를 대신하지 않습니다.'
               : '한 눈씩 가운데 점을 보며 위·아래·왼쪽·오른쪽에 나타나는 빛에 반응합니다. 정밀 시야검사가 아니며 변화 확인용입니다.',
-    sym:'응급 항목과 내 위치에서 살펴볼 증상을 체크합니다.',
-    smell:'집에 있는 커피·식초 같은 냄새를 코 한쪽씩 맡아 보고 기록합니다.',
-    hear:'이어폰으로 좌우 소리를 들어 보고 어느 정도 들렸는지 기록합니다.',
+    sym:'응급 항목과 내 위치에서 살펴볼 증상(청력·냄새 변화 포함)을 체크합니다.',
     care:'보호자가 곁에서 본 성격·행동·경련·균형의 변화를 기록합니다.',
   }[type];
-  const view = { tap:'tapIntro', vf4:'vfIntro', sym:'sym', smell:'smell', hear:'hear', care:'care' }[type];
-  return `<li><div><b>${esc(FU.TYPE_KO[type])}</b>${core ? (type === 'vf4' && quick ? ' <span class="fu-rec">빠른 확인</span>' : ' <span class="fu-rec">권장</span>') : ''}<div class="tiny">${esc(desc)}</div><div class="fu-chips">${chips}</div></div><button class="btn sm${core ? ' primary' : ''}" data-fu="go" data-v="${view}">시작</button></li>`;
+  const view = { tap:'tapIntro', rhythm:'rhythmIntro', vf4:'vfIntro', sym:'sym', care:'care' }[type];
+  const watch = (type === 'tap' || type === 'rhythm') ? fuWatchNote(type) : '';
+  return `<li><div><b>${esc(FU.TYPE_KO[type])}</b>${core ? (type === 'vf4' && quick ? ' <span class="fu-rec">빠른 확인</span>' : ' <span class="fu-rec">권장</span>') : ''}<div class="tiny">${esc(desc)}${watch}</div><div class="fu-chips">${chips}</div></div><button class="btn sm${core ? ' primary' : ''}" data-fu="go" data-v="${view}">시작</button></li>`;
 }
 function fuRecLine(c){
-  if(c.type === 'tap') return `왼손 ${c.L.n}회${c.L.cv !== null ? '(리듬 흔들림 ' + c.L.cv + '%)' : ''} · 오른손 ${c.R.n}회${c.R.cv !== null ? '(' + c.R.cv + '%)' : ''} · 좌우 차이 ${FU.tapLR(c) === null ? '-' : FU.tapLR(c) + '%'}`;
+  const hand = fuState().hand;
+  if(c.type === 'tap'){
+    const lr = FU.tapLR(c, hand);
+    const tr = c.trials ? ` (왼손 ${c.trials.L.join('·')} / 오른손 ${c.trials.R.join('·')})` : '';
+    const bad = FU.tapValid(c) ? '' : ' (10초 70회 초과: 측정 오류로 비교에서 제외)';
+    return `왼손 ${c.L.n}회 · 오른손 ${c.R.n}회${tr} · 좌우 차이 ${lr === null ? '-' : lr + '%'}${bad}`;
+  }
+  if(c.type === 'rhythm'){
+    const h = (k, nm) => `${nm} 흔들림 ${c[k].cv === null ? '-' : c[k].cv + '%'}(평균 간격 ${c[k].meanMs === null ? '-' : c[k].meanMs + 'ms'}, 실수 ${c[k].err})`;
+    return `${h('L', '왼손')} · ${h('R', '오른손')}`;
+  }
   if(c.type === 'vf4') return `${FU_EYE[c.eye]} 눈 · 위 ${c.seen.u}/3 · 아래 ${c.seen.d}/3 · 왼쪽 ${c.seen.l}/3 · 오른쪽 ${c.seen.r}/3 · 확인용 ${c.catch.pressed}/${c.catch.shown}회 눌림${FU.vfReliable(c) ? '' : ' (기준점 비교에서 제외)'}`;
   if(c.type === 'smell') return `왼쪽 ${FU.LEVEL3.smell[c.L]} · 오른쪽 ${FU.LEVEL3.smell[c.R]}`;
   if(c.type === 'hear') return `왼쪽 ${FU.LEVEL3.hear[c.L]} · 오른쪽 ${FU.LEVEL3.hear[c.R]}`;
@@ -260,8 +279,8 @@ function fuHistory(){
   if(!s.checks.length) return '<p class="tiny">아직 체크 기록이 없습니다. 위에서 체크를 시작하세요.</p>';
   const baseIds = new Set();
   for(const t of FU.TYPES){
-    if(t === 'vf4'){ for(const e of ['R', 'L']){ const b = FU.compare(s, 'vf4', e).base; if(b) baseIds.add(b.id); } }
-    else { const b = FU.compare(s, t).base; if(b) baseIds.add(b.id); }
+    if(t === 'vf4'){ for(const e of ['R', 'L']) for(const id of FU.baseIds(s, 'vf4', e)) baseIds.add(id); }
+    else for(const id of FU.baseIds(s, t)) baseIds.add(id);
   }
   const rows = s.checks.slice().reverse().map(c => {
     const key = 'chk:' + c.id;
@@ -313,11 +332,12 @@ function fuGraphHtml(){
   return `${cr}<div class="fu-figs">${out.join('')}</div><p class="tiny">점만 찍으며 기록하지 않은 날의 값을 추정해 잇지 않습니다. 그래프는 변화 확인용이고 진단이 아닙니다.</p>`;
 }
 
-/* ── 손가락 두드리기 ── */
+/* ── 빠르게 두드리기 (스페이스바만 · 손마다 10초 × 3번 · 사이 5초 쉬기 · 평균 저장) ── */
+const FU_KEY_ONLY = '키보드의 <b>스페이스바</b>를 <b>검지 하나</b>로 누릅니다. 화면을 누르거나 마우스를 쓰는 값은 세지 않습니다(입력 방법이 섞이면 비교할 수 없기 때문).';
 function fuTapIntro(){
-  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>손가락 두드리기</h3></div><div class="card-pad">
-    <ol class="fu-steps"><li>편하게 앉아 기기를 책상에 두세요.</li><li>왼손 → 오른손 순서로 <b>10초씩</b> 가능한 한 일정한 속도로 화면(또는 스페이스바)을 두드립니다.</li><li>시작 버튼을 누르면 3초 준비 뒤 10초가 시작됩니다.</li><li>두드린 횟수, 리듬의 흔들림, 좌우 차이가 기록됩니다.</li></ol>
-    <p class="tiny">같은 기기·같은 자세로 하면 기준점과 비교하기 쉽습니다. 검사 도중 화면을 벗어나면 이번 검사는 기록하지 않고 중단합니다.</p>
+  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>빠르게 두드리기</h3></div><div class="card-pad">
+    <ol class="fu-steps"><li>편하게 앉아 키보드가 있는 기기를 책상에 두세요.</li><li>${FU_KEY_ONLY}</li><li>왼손 → 오른손 순서로, 손마다 <b>10초씩 3번</b> 최대한 빠르게 누릅니다. 사이에 5초 쉽니다.</li><li>3번의 평균과 좌우 차이가 기록됩니다. 10초에 ${FU.TAP_MAX}회를 넘으면 측정 오류로 보고 그 회차를 다시 합니다.</li></ol>
+    <p class="tiny">같은 기기·같은 자세로 하면 기준점과 비교하기 쉽습니다. 처음 2번 기록의 평균이 기준점이 됩니다.${fuWatchNote('tap')} 검사 도중 화면을 벗어나면 이번 검사는 기록하지 않고 중단합니다.</p>
     <div class="fu-actions"><button class="btn primary" data-fu="tapStart">시작</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div></div></div>`;
 }
 function fuStageOpen(title){
@@ -349,60 +369,132 @@ function fuStageKey(e){
   }
   if(e.key === ' ' || e.code === 'Space'){
     const t = FUS.test;
-    if(t.phase === 'run' || t.phase === 'trial'){ e.preventDefault(); if(!e.repeat) fuPress(); }
+    if(t.phase === 'run' || t.phase === 'trial'){ e.preventDefault(); if(!e.repeat) fuPress(true); }   // 누르고 있는 키 반복은 세지 않음
   }
 }
-function fuPress(){
+/** fromKey: 스페이스바에서 왔는지. 두드리기·박자 두드리기는 스페이스바만 셉니다. 간단 시야는 화면 누르기도 받습니다. */
+function fuPress(fromKey){
   const t = FUS.test; if(!t) return;
-  if(t.kind === 'tap' && t.phase === 'run'){
+  if((t.kind === 'tap' || t.kind === 'rhythm') && t.phase === 'run'){
+    if(!fromKey) return;
     const dt = fuNow() - t.t0;
-    if(dt >= 0 && dt <= FU.TAP_MS){ t.times.push(dt); fuEl('fuStageCount').textContent = `${t.times.length}회`; }
+    if(dt >= 0 && dt <= t.dur){ t.times.push(dt); fuEl('fuStageCount').textContent = `${t.times.length}회`; }
   } else if(t.kind === 'vf4' && t.phase === 'trial' && t.open){
     t.pressed = true;
   }
 }
 function fuTapStart(){
-  FUS.test = { kind:'tap', hand:'L', res:{}, phase:'ready', times:[], t0:0 };
-  fuStageOpen('손가락 두드리기');
+  FUS.test = { kind:'tap', hand:'L', trial:0, res:{ L:[], R:[] }, phase:'ready', times:[], t0:0, dur:FU.TAP_MS, note:'' };
+  fuStageOpen('빠르게 두드리기');
   fuTapReady();
 }
+const fuTapLabel = t => `${FU_HAND[t.hand]} ${t.trial + 1}/${FU.TAP_TRIALS}번째`;
 function fuTapReady(){
   const t = FUS.test; if(!t) return;
   t.phase = 'ready'; t.times = [];
-  fuStageSet({ msg:`${FU_HAND[t.hand]}을 준비하세요. 시작을 누르면 3초 뒤 10초가 시작됩니다.`, go:'시작' });
+  fuStageSet({ msg:`${t.note}${fuTapLabel(t)}: 검지를 스페이스바에 올리세요. 시작을 누르면 3초 뒤 10초가 시작됩니다.`, go:'시작' });
+  t.note = '';
 }
 function fuTapCountdown(){
   const t = FUS.test; if(!t) return;
   t.phase = 'count';
-  fuStageSet({ msg:`${FU_HAND[t.hand]} — 곧 시작합니다`, count:'3' });
-  fuSetTimer(() => fuStageSet({ msg:`${FU_HAND[t.hand]} — 곧 시작합니다`, count:'2' }), 1000);
-  fuSetTimer(() => fuStageSet({ msg:`${FU_HAND[t.hand]} — 곧 시작합니다`, count:'1' }), 2000);
+  fuStageSet({ msg:`${fuTapLabel(t)} — 곧 시작합니다`, count:'3' });
+  fuSetTimer(() => fuStageSet({ msg:`${fuTapLabel(t)} — 곧 시작합니다`, count:'2' }), 1000);
+  fuSetTimer(() => fuStageSet({ msg:`${fuTapLabel(t)} — 곧 시작합니다`, count:'1' }), 2000);
   fuSetTimer(fuTapRun, 3000);
 }
 function fuTapRun(){
   const t = FUS.test; if(!t) return;
   t.phase = 'run'; t.t0 = fuNow(); t.times = [];
-  fuStageSet({ msg:`${FU_HAND[t.hand]}으로 두드리세요! (10초)`, count:'0회', pad:true });
+  fuStageSet({ msg:`${fuTapLabel(t)}: 스페이스바를 최대한 빠르게! (10초)`, count:'0회' });
   fuSetTimer(fuTapEnd, FU.TAP_MS);
 }
 function fuTapEnd(){
   const t = FUS.test; if(!t) return;
   t.phase = 'between';
-  t.res[t.hand] = FU.tapMetrics(t.times);
-  if(t.hand === 'L'){ t.hand = 'R'; fuTapReady(); return; }
-  FUS.draft = { type:'tap', L:t.res.L, R:t.res.R };
+  const m = FU.tapMetrics(t.times);
+  if(m.over){                                               // 70회 초과: 측정 오류 → 같은 회차를 다시
+    t.note = `10초에 ${m.n}회가 눌려 측정 오류로 보고 이 회차를 다시 합니다. 검지 하나로만 눌러 주세요. `;
+    return fuTapReady();
+  }
+  t.res[t.hand].push(m.n);
+  if(t.trial < FU.TAP_TRIALS - 1){                           // 같은 손 다음 회차: 5초 쉬고 자동으로 준비
+    t.trial++; t.phase = 'rest';
+    const sec = Math.round(FU.TAP_REST_MS / 1000);
+    for(let i = 0; i < sec; i++) fuSetTimer(() => fuStageSet({ msg:`쉬세요. 다음은 ${fuTapLabel(t)}입니다.`, count:`${sec - i}` }), i * 1000);
+    fuSetTimer(fuTapCountdown, FU.TAP_REST_MS);
+    return;
+  }
+  if(t.hand === 'L'){ t.hand = 'R'; t.trial = 0; fuTapReady(); return; }
+  FUS.draft = FU.tapRecord(t.res.L, t.res.R);
   fuStageClose(); FUS.view = 'tapDone'; fuRender();
 }
 function fuTapDone(){
   const d = FUS.draft; if(!d || d.type !== 'tap') return '<div class="card"><div class="card-pad">기록할 결과가 없습니다. <button class="btn" data-fu="go" data-v="home">돌아가기</button></div></div>';
-  const lr = FU.tapLR(d);
-  return `<div class="card"><div class="card-hd"><h3>두드리기 결과</h3></div><div class="card-pad">
-    <div class="fu-scroll"><table class="rec"><thead><tr><th></th><th>10초 횟수</th><th>리듬 흔들림</th></tr></thead><tbody>
-      <tr><td>왼손</td><td>${d.L.n}회</td><td>${d.L.cv === null ? '계산하기엔 횟수가 적음' : d.L.cv + '%'}</td></tr>
-      <tr><td>오른손</td><td>${d.R.n}회</td><td>${d.R.cv === null ? '계산하기엔 횟수가 적음' : d.R.cv + '%'}</td></tr></tbody></table></div>
-    <p>좌우 차이: <b>${lr === null ? '-' : lr + '%'}</b></p>
-    <p class="tiny">숫자만으로 의미를 판단하지 않습니다. 첫 측정이 기준점이 되고, 이후 기록은 기준점과의 차이만 비교합니다. 너무 적게 두드렸거나 방해가 있었다면 다시 하세요.</p>
+  const lr = FU.tapLR(d, fuState().hand);
+  return `<div class="card"><div class="card-hd"><h3>빠르게 두드리기 결과</h3></div><div class="card-pad">
+    <div class="fu-scroll"><table class="rec"><thead><tr><th></th><th>1번</th><th>2번</th><th>3번</th><th>평균 (10초)</th></tr></thead><tbody>
+      ${['L', 'R'].map(k => `<tr><td>${FU_HAND[k]}</td>${[0, 1, 2].map(i => `<td>${d.trials && d.trials[k][i] !== undefined ? d.trials[k][i] + '회' : '-'}</td>`).join('')}<td><b>${d[k].n}회</b></td></tr>`).join('')}</tbody></table></div>
+    <p>좌우 차이(잘 쓰는 손 기준): <b>${lr === null ? '-' : lr + '%'}</b></p>
+    <p class="tiny">숫자만으로 의미를 판단하지 않습니다. 처음 2번 기록의 평균이 기준점이 되고, 이후 기록은 기준점보다 줄었는지만 비교합니다. 방해가 있었다면 다시 하세요.</p>
     <div class="fu-actions"><button class="btn primary" data-fu="saveTap">이 결과 기록하기</button><button class="btn" data-fu="tapStart">다시 하기</button><button class="btn ghost" data-fu="discard">기록하지 않고 닫기</button></div></div></div>`;
+}
+
+/* ── 박자 두드리기 (스페이스바만 · 연습 10초(저장 안 함) → 왼손 20초 → 오른손 20초) ──
+   흔들림(cv)이 측정값이므로 "규칙적으로 누르라"는 경고를 하지 않습니다. 실수(두 번 눌림·멈춤·너무 적음)만 다시 하게 합니다. */
+function fuRhythmIntro(){
+  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>박자 두드리기</h3></div><div class="card-pad">
+    <ol class="fu-steps"><li>${FU_KEY_ONLY}</li><li><b>편한 속도로, 같은 박자를 유지하며</b> 누르세요. 빨리 누르는 검사가 아닙니다.</li><li>먼저 10초 연습(기록하지 않음), 그다음 왼손 20초 → 오른손 20초입니다.</li><li>누르는 간격이 얼마나 일정한지(흔들림 %)가 기록됩니다. 두 번 눌림·멈춤이 많으면 다시 하게 됩니다.</li></ol>
+    <p class="tiny">처음 2번 기록의 평균이 기준점이 됩니다.${fuWatchNote('rhythm')} 변화 기준은 건강한 사람의 반복 측정으로 정하는 중이라, 그 전까지는 숫자만 기록하고 "기준 만드는 중"으로 보여 줍니다.</p>
+    <div class="fu-actions"><button class="btn primary" data-fu="rhythmStart">시작</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div></div></div>`;
+}
+const FU_RHY_STEPS = ['P', 'L', 'R'];
+const fuRhyLabel = st => st === 'P' ? '연습(기록하지 않음)' : FU_HAND[st];
+function fuRhythmStart(){
+  FUS.test = { kind:'rhythm', step:0, res:{}, phase:'ready', times:[], t0:0, dur:FU.RHY.practiceMs };
+  fuStageOpen('박자 두드리기');
+  fuRhythmReady();
+}
+function fuRhythmReady(){
+  const t = FUS.test; if(!t) return;
+  const st = FU_RHY_STEPS[t.step];
+  t.phase = 'ready'; t.times = []; t.dur = st === 'P' ? FU.RHY.practiceMs : FU.RHY.ms;
+  fuStageSet({ msg:`${fuRhyLabel(st)}: 검지를 스페이스바에 올리세요. 시작을 누르면 3초 뒤 ${t.dur / 1000}초 동안 편한 박자로 누릅니다.`, go:'시작' });
+}
+function fuRhythmCountdown(){
+  const t = FUS.test; if(!t) return;
+  const lb = fuRhyLabel(FU_RHY_STEPS[t.step]);
+  t.phase = 'count';
+  fuStageSet({ msg:`${lb} — 곧 시작합니다`, count:'3' });
+  fuSetTimer(() => fuStageSet({ msg:`${lb} — 곧 시작합니다`, count:'2' }), 1000);
+  fuSetTimer(() => fuStageSet({ msg:`${lb} — 곧 시작합니다`, count:'1' }), 2000);
+  fuSetTimer(fuRhythmRun, 3000);
+}
+function fuRhythmRun(){
+  const t = FUS.test; if(!t) return;
+  t.phase = 'run'; t.t0 = fuNow(); t.times = [];
+  fuStageSet({ msg:`${fuRhyLabel(FU_RHY_STEPS[t.step])}: 편한 속도로 같은 박자를 유지하며 누르세요. (${t.dur / 1000}초)`, count:'0회' });
+  fuSetTimer(fuRhythmEnd, t.dur);
+}
+function fuRhythmEnd(){
+  const t = FUS.test; if(!t) return;
+  t.phase = 'between';
+  const st = FU_RHY_STEPS[t.step];
+  if(st !== 'P') t.res[st] = FU.rhythmMetrics(t.times, FU.RHY.ms);
+  if(t.step < FU_RHY_STEPS.length - 1){ t.step++; return fuRhythmReady(); }
+  FUS.draft = { type:'rhythm', L:t.res.L, R:t.res.R, input:'space' };
+  fuStageClose(); FUS.view = 'rhythmDone'; fuRender();
+}
+function fuRhythmDone(){
+  const d = FUS.draft; if(!d || d.type !== 'rhythm') return '<div class="card"><div class="card-pad">기록할 결과가 없습니다. <button class="btn" data-fu="go" data-v="home">돌아가기</button></div></div>';
+  const ok = FU.rhythmValid(d);
+  const why = k => d[k].valid ? '' : `${FU_HAND[k]}: 두 번 눌림·멈춤이 많거나 누른 횟수가 적어(실수 ${d[k].err}회) 결과를 쓰기 어렵습니다.`;
+  const row = k => `<tr><td>${FU_HAND[k]}</td><td>${d[k].cv === null ? '-' : d[k].cv + '%'}</td><td>${d[k].meanMs === null ? '-' : d[k].meanMs + 'ms'}</td><td>${d[k].err}회</td><td>${d[k].valid ? '사용 가능' : '다시 필요'}</td></tr>`;
+  return `<div class="card"><div class="card-hd"><h3>박자 두드리기 결과</h3></div><div class="card-pad">
+    <div class="fu-scroll"><table class="rec"><thead><tr><th></th><th>흔들림 (낮을수록 일정)</th><th>평균 간격</th><th>실수</th><th></th></tr></thead><tbody>${row('L')}${row('R')}</tbody></table></div>
+    ${ok ? '' : `<p class="err" role="alert">${esc([why('L'), why('R')].filter(Boolean).join(' '))} 다시 해 주세요.</p>`}
+    <p class="tiny">흔들림 = 누르는 간격의 표준편차 ÷ 평균 간격 × 100. 처음 5개 간격과 실수(0.15초보다 짧은 간격, 보통 간격의 2배보다 긴 멈춤)는 뺐습니다. 숫자만으로 의미를 판단하지 않습니다.</p>
+    <div class="fu-actions">${ok ? '<button class="btn primary" data-fu="saveRhythm">이 결과 기록하기</button>' : ''}<button class="btn${ok ? '' : ' primary'}" data-fu="rhythmStart">다시 하기</button><button class="btn ghost" data-fu="discard">기록하지 않고 닫기</button></div></div></div>`;
 }
 
 /* ── 간단 시야 (한 눈씩 · 4방향) ── */
@@ -480,7 +572,7 @@ function fuVfDone(){
     <div class="fu-actions"><button class="btn primary" data-fu="saveVf">이 결과 기록하기</button><button class="btn" data-fu="go" data-v="vfIntro">다시 하기</button><button class="btn ghost" data-fu="discard">기록하지 않고 닫기</button></div></div></div>`;
 }
 
-/* ── 증상·후각·청력·보호자·약 ── */
+/* ── 증상·보호자·약 (후각·청력은 증상 기록의 항목으로만 남김) ── */
 function fuSymForm(){
   const cfg = FU.setupFor(fuState().loc);
   const box = i => `<label class="fu-check${i.em ? ' fu-em' : ''}"><input type="checkbox" data-sym="${i.id}"${i.needsCare && !FUS.careOk ? ' disabled' : ''}> <span>${esc(i.ko)}</span></label>`;
@@ -493,33 +585,6 @@ function fuSymForm(){
     <div class="field"><label for="fuDate">날짜</label>${fuDateIn('fuDate', fuToday(), true)}</div>
     <div class="fu-actions"><button class="btn primary" data-fu="saveSym">기록하기</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div>
     <p class="tiny">체크한 항목이 없어도 “없음”으로 기록됩니다. 이 기록은 진단이 아니며 진료 때 보여 드리는 자료입니다.</p></div></div>`;
-}
-function fuLevelForm(kind){
-  const names = FU.LEVEL3[kind];
-  const row = (k, nm) => `<fieldset class="fu-fs"><legend>${nm}</legend>${names.map((t, i) => `<label class="fu-radio"><input type="radio" name="fu${kind}${k}" value="${i}"${i === 2 ? ' checked' : ''}> ${esc(t)}</label>`).join('')}</fieldset>`;
-  const intro = kind === 'smell'
-    ? '<ol class="fu-steps"><li>집에 있는 커피나 식초처럼 평소 아는 냄새를 준비하세요. 자극이 강한 물질(암모니아 등)은 쓰지 마세요.</li><li>눈을 감고 한쪽 콧구멍을 막은 채 다른 쪽으로 냄새를 맡아 보세요.</li><li>반대쪽도 같은 방법으로 하고 느낀 정도를 고르세요.</li></ol>'
-    : `<ol class="fu-steps"><li>이어폰을 끼고 <b>소리를 아주 작게</b> 맞추세요. 아래 버튼을 누르면 낮은 소리가 1.5초 납니다.</li><li>불편하면 바로 이어폰을 빼세요.</li><li>왼쪽·오른쪽 소리를 각각 들어 보고 느낀 정도를 고르세요. 기기 음량에 따라 다르므로 같은 음량으로 비교하세요.</li></ol>
-       <div class="fu-actions"><button class="btn" data-fu="tone" data-s="L">왼쪽 소리 듣기</button><button class="btn" data-fu="tone" data-s="R">오른쪽 소리 듣기</button></div><p class="tiny" id="fuToneMsg" role="status"></p>`;
-  return `<div class="card"><div class="card-hd"><h3>${esc(FU.TYPE_KO[kind])}</h3></div><div class="card-pad">${intro}
-    <div class="fu-grid">${row('L', '왼쪽')}${row('R', '오른쪽')}</div>
-    <div class="field"><label for="fuDate">날짜</label>${fuDateIn('fuDate', fuToday(), true)}</div>
-    <div class="fu-actions"><button class="btn primary" data-fu="saveLevel" data-kind="${kind}">기록하기</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div>
-    <p class="tiny">집에서의 간단한 자가 기록입니다. 검사 결과나 진단이 아닙니다.</p></div></div>`;
-}
-function fuTone(side){
-  fuAudioStop();
-  const msg = fuEl('fuToneMsg');
-  try{
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if(!AC){ if(msg) msg.textContent = '이 브라우저에서는 소리 재생을 쓸 수 없습니다.'; return; }
-    const ctx = new AC(), osc = ctx.createOscillator(), gain = ctx.createGain(), pan = ctx.createStereoPanner();
-    osc.type = 'sine'; osc.frequency.value = 1000; gain.gain.value = 0.05; pan.pan.value = side === 'L' ? -1 : 1;
-    osc.connect(gain); gain.connect(pan); pan.connect(ctx.destination);
-    osc.start(); FUS.audio = { ctx, osc };
-    fuSetTimer(fuAudioStop, 1500);
-    if(msg) msg.textContent = `${side === 'L' ? '왼쪽' : '오른쪽'} 소리를 재생했습니다.`;
-  }catch(e){ if(msg) msg.textContent = '소리를 재생하지 못했습니다.'; }
 }
 function fuCareForm(){
   const cfg = FU.setupFor(fuState().loc);
@@ -542,17 +607,24 @@ function fuMedsForm(){
 }
 
 /* ── 진료 전 요약 ── */
+/* 요약 표의 비교 칸 문구 (고정 문구 + 숫자) */
+function fuCmpWord(c){
+  if(c.state === 'baseline') return c.need ? `기준점 만드는 중 (${c.n}/2)` : '기준점만 있음';
+  if(c.state === 'building') return '기준 만드는 중 (변화 기준을 건강인 측정으로 정하는 중)';
+  if(c.state === 'same') return '비슷함';
+  return '변화 있음';
+}
 function fuSummaryText(m){
   const L = [];
   L.push('SIRIUS 경과 관찰 요약 (진단이 아닌 자가 기록)');
-  L.push(`종양 위치: ${m.locKo} · 치우친 쪽: ${m.sideKo}`);
+  L.push(`종양 위치: ${m.locKo} · 치우친 쪽: ${m.sideKo} · 잘 쓰는 손: ${m.handKo}`);
   L.push(`다음 MRI 예정일: ${m.next || '미정'}`);
   if(m.mri.length){ L.push('MRI 크기 기록:'); for(const x of m.mri) L.push(`- ${x.date} ${x.size} mm`); }
   if(m.vfLines.length){ L.push('정밀 시야검사(앱 점수, 내 기준선과 비교):'); for(const x of m.vfLines) L.push(`- ${x}`); }
   L.push(`약 사용 기록(메드록시프로게스테론 주사 등): ${m.hormoneKo}${m.hormoneDate ? ' (' + m.hormoneDate + ')' : ''}`);
   if(m.compare.length){
     L.push('첫 측정(기준점)과의 비교:');
-    for(const c of m.compare) L.push(`- ${c.name}: ${c.state === 'baseline' ? '기준점만 있음' : c.state === 'same' ? '비슷함' : '변화 있음 — ' + c.reasons.join(', ')}`);
+    for(const c of m.compare) L.push(`- ${c.name}${c.watchKo ? ` (주의할 손: ${c.watchKo})` : ''}: ${fuCmpWord(c)}${c.state === 'changed' ? ' — ' + c.reasons.join(', ') : ''}${c.notes.length ? ' · 참고: ' + c.notes.join(', ') : ''}`);
   }
   if(m.crossing.cross || m.crossing.undetermined) L.push(`참고: ${m.crossing.text}`);
   if(m.emergencyItems.length) L.push(`응급 항목 체크(${m.emergencyDate}): ${m.emergencyItems.join(', ')}`);
@@ -565,12 +637,12 @@ function fuSummaryText(m){
 /* 인쇄·PDF용 한 페이지 요약: 최근 MRI 3개 · 기능은 기준점과 최근 · 질문 · 안전 안내만. 전체 자료는 화면에 둡니다. */
 function fuPrintCompact(m){
   const mri = m.mriRecent.length ? m.mriRecent.map(x => `${esc(x.date)} ${x.size} mm`).join(' · ') : '입력한 기록 없음';
-  const cmp = m.compare.length ? `<table class="rec"><thead><tr><th>체크</th><th>기준점</th><th>최근</th><th>비교</th></tr></thead><tbody>${m.compare.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.base)}</td><td>${esc(c.latest)}</td><td>${c.state === 'baseline' ? '기준점만 있음' : c.state === 'same' ? '비슷함' : '변화 있음: ' + esc(c.reasons.slice(0, 2).join(' · '))}${c.limited ? ' (화면 크기가 달라 비교에 한계)' : ''}</td></tr>`).join('')}</tbody></table>` : '<p>체크 기록 없음</p>';
+  const cmp = m.compare.length ? `<table class="rec"><thead><tr><th>체크</th><th>기준점</th><th>최근</th><th>비교</th></tr></thead><tbody>${m.compare.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.base)}</td><td>${esc(c.latest)}</td><td>${esc(fuCmpWord(c))}${c.state === 'changed' ? ': ' + esc(c.reasons.slice(0, 2).join(' · ')) : ''}${c.watchKo ? ' (주의할 손: ' + esc(c.watchKo) + ')' : ''}${c.limited ? ' (화면 크기가 달라 비교에 한계)' : ''}</td></tr>`).join('')}</tbody></table>` : '<p>체크 기록 없음</p>';
   const note = (m.crossing.cross || m.crossing.undetermined) ? `<p>${m.crossing.cross ? '' : '엇갈림 판단 불가: '}${esc(m.crossing.text)}</p>` : '';
   const em = (m.emergencyItems.length ? `<p><b>응급 항목 체크(${esc(m.emergencyDate)}):</b> ${esc(m.emergencyItems.join(' · '))}</p>` : '')
     + (m.emergencyDates.length ? `<p>과거에 응급 항목을 체크한 날짜: ${esc(m.emergencyDates.join(', '))}</p>` : '');
   return `<div id="fuPrintCompact" class="fu-print-only"><h3>SIRIUS 경과 관찰 요약 <small>${esc(fuToday())} · 진단이 아닌 자가 기록</small></h3>
-    <p>종양 위치 <b>${esc(m.locKo)}</b> · 치우친 쪽 <b>${esc(m.sideKo)}</b> · 다음 MRI <b>${esc(m.next || '미정')}</b> · 약 사용 기록(메드록시프로게스테론 주사 등) <b>${esc(m.hormoneKo)}</b>${(m.hormone === 'now' || m.hormone === 'past') ? ' — 의사에게 알려 주세요' : ''}</p>
+    <p>종양 위치 <b>${esc(m.locKo)}</b> · 치우친 쪽 <b>${esc(m.sideKo)}</b> · 잘 쓰는 손 <b>${esc(m.handKo)}</b> · 다음 MRI <b>${esc(m.next || '미정')}</b> · 약 사용 기록(메드록시프로게스테론 주사 등) <b>${esc(m.hormoneKo)}</b>${(m.hormone === 'now' || m.hormone === 'past') ? ' — 의사에게 알려 주세요' : ''}</p>
     <p>최근 MRI 크기 기록: ${mri}</p>${m.vfLines.length ? `<p><b>정밀 시야(앱 점수)</b><br>${m.vfLines.map(esc).join('<br>')}</p>` : ''}${cmp}${note}${em}
     <p><b>의사에게 할 질문</b></p><ol>${m.printQuestions.map(q => `<li>${esc(q)}</li>`).join('')}</ol>
     <p class="fu-safe">응급: 갑작스러운 마비·말 어눌함·얼굴 처짐·평소와 다른 심한 두통·갑작스러운 시력 저하는 바로 119. 이 요약은 집에서 한 간단한 자가 기록이며 진단이나 의학적 판단이 아닙니다. 비교는 앱 화면 표시용 기준이며 의학적 기준이 아닙니다.</p></div>`;
@@ -579,14 +651,14 @@ function fuSummary(){
   const m = FU.summary(S.followup, fuToday(), fuVfExtra());
   const vfx = m.vfLines.length ? `<h4 class="fu-h4">정밀 시야검사 (앱 점수 · 내 기준선과 비교)</h4><ul class="fu-q">${m.vfLines.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="tiny">평균·귀쪽−코쪽(좌우 짝)·집중 구역 변화와 검사 지도(mapId)를 함께 적었습니다. 같은 지도의 기록끼리만 비교합니다.</p>` : '';
   const mri = m.mri.length ? `<div class="fu-scroll"><table class="rec fu-narrow"><thead><tr><th>촬영일</th><th>크기</th></tr></thead><tbody>${m.mri.map(x => `<tr><td>${esc(x.date)}</td><td>${x.size} mm</td></tr>`).join('')}</tbody></table></div>` : '<p>입력한 MRI 기록 없음</p>';
-  const cmp = m.compare.length ? `<div class="fu-scroll"><table class="rec"><thead><tr><th>체크</th><th>기준점</th><th>최근</th><th>비교</th></tr></thead><tbody>${m.compare.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.base)}</td><td>${esc(c.latest)}</td><td>${c.state === 'baseline' ? '기준점만 있음' : c.state === 'same' ? '비슷함' : '▲ 변화 있음' + (c.repeated ? ' (이어짐)' : '') + '<br><span class="tiny">' + esc(c.reasons.join(' · ')) + '</span>'}${c.limited ? '<br><span class="tiny">' + esc(c.limitNote) + '</span>' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p>체크 기록 없음</p>';
+  const cmp = m.compare.length ? `<div class="fu-scroll"><table class="rec"><thead><tr><th>체크</th><th>기준점</th><th>최근</th><th>비교</th></tr></thead><tbody>${m.compare.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.base)}</td><td>${esc(c.latest)}</td><td>${c.state === 'changed' ? '▲ 변화 있음' + (c.repeated ? ' (이어짐)' : '') + '<br><span class="tiny">' + esc(c.reasons.join(' · ')) + '</span>' : esc(fuCmpWord(c))}${c.watchKo ? '<br><span class="tiny">주의할 손: ' + esc(c.watchKo) + '</span>' : ''}${c.notes.length ? '<br><span class="tiny">참고: ' + esc(c.notes.join(' · ')) + '</span>' : ''}${c.limited ? '<br><span class="tiny">' + esc(c.limitNote) + '</span>' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p>체크 기록 없음</p>';
   const em = m.emergencyItems.length ? `<div class="fu-119"><b>응급 항목을 체크한 기록이 있습니다 (${esc(m.emergencyDate)}).</b> ${esc(m.emergencyItems.join(' · '))}</div>` : '';
   const ask = FUS.exportAsk
     ? `<div class="fu-confirm" role="alertdialog" aria-label="내보내기 확인"><p><b>이 요약에는 건강 정보가 들어 있습니다.</b> 인쇄·PDF·복사하면 이 앱 밖(종이, 파일, 클립보드)에 남습니다. 어디에 두는지 확인하고 진행하세요.</p><button class="btn primary" data-fu="exportPrint">인쇄 / PDF로 저장</button> <button class="btn" data-fu="exportCopy">글로 복사</button> <button class="btn ghost" data-fu="askNo">취소</button></div>`
     : '<div class="fu-actions"><button class="btn primary" data-fu="exportAsk">인쇄 · PDF · 복사…</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div>';
   return `${fuPrintCompact(m)}<div class="card fu-screen"><div class="card-hd"><h3>진료 전 요약</h3><span class="right tiny">${esc(fuToday())} 기준 · 진단이 아닌 자가 기록</span></div><div class="card-pad">
     ${FU_EMERGENCY_HTML}${em}
-    <h4 class="fu-h4">종양 정보</h4><p>위치: <b>${esc(m.locKo)}</b> · 치우친 쪽: <b>${esc(m.sideKo)}</b> · 다음 MRI 예정일: <b>${esc(m.next || '미정')}</b></p>${mri}${vfx}
+    <h4 class="fu-h4">종양 정보</h4><p>위치: <b>${esc(m.locKo)}</b> · 치우친 쪽: <b>${esc(m.sideKo)}</b> · 잘 쓰는 손: <b>${esc(m.handKo)}</b> · 다음 MRI 예정일: <b>${esc(m.next || '미정')}</b></p>${mri}${vfx}
     <h4 class="fu-h4">약 사용 기록</h4><p>메드록시프로게스테론 주사 등: ${esc(m.hormoneKo)}${m.hormoneDate ? ' · ' + esc(m.hormoneDate) : ''}${(m.hormone === 'now' || m.hormone === 'past') ? '<br><b>의사에게 꼭 알리세요.</b>' : ''}</p>
     <h4 class="fu-h4">첫 측정(기준점)과의 비교</h4>${cmp}${m.crossing.cross ? `<div class="fu-cross" role="note">${esc(m.crossing.text)}</div>` : ''}
     <h4 class="fu-h4">MRI 크기와 체크 그래프</h4>${fuGraphHtml()}
@@ -751,12 +823,6 @@ async function fuBkReplace(){
 /* ── 이벤트 ── */
 function fuVal(id){ const e = fuEl(id); return e ? e.value : ''; }
 function fuChecked(attr){ return [...document.querySelectorAll(`#fuRoot [${attr}]`)].filter(x => x.checked).map(x => x.getAttribute(attr)); }
-function fuSaveLevel(kind){
-  const L = document.querySelector(`input[name="fu${kind}L"]:checked`), R = document.querySelector(`input[name="fu${kind}R"]:checked`);
-  if(!L || !R){ FUS.msg = '왼쪽과 오른쪽을 모두 골라 주세요.'; FUS.msgOk = false; fuRender(); return; }
-  const r = FU.addCheck(S.followup, { type:kind, date:fuVal('fuDate'), L:+L.value, R:+R.value }, fuToday());
-  if(fuApply(r, '기록했습니다.')) FUS.view = 'home', fuRender();
-}
 function fuOnClick(e){
   if(FUS.busy) return;                                          // 교체 저장 중에는 모든 조작 무시
   const b = e.target.closest ? e.target.closest('[data-fu]') : null;
@@ -790,7 +856,9 @@ function fuOnClick(e){
   }
   if(a === 'tapStart') return fuTapStart();
   if(a === 'vfStart') return fuVfStart();
-  if(a === 'saveTap'){ const d = FUS.draft; if(!d || d.type !== 'tap') return; const r = FU.addCheck(S.followup, { type:'tap', date:today, L:d.L, R:d.R }, today); if(fuApply(r, '두드리기 기록을 저장했습니다.')){ FUS.draft = null; FUS.view = 'home'; fuRender(); } return; }
+  if(a === 'saveTap'){ const d = FUS.draft; if(!d || d.type !== 'tap') return; const r = FU.addCheck(S.followup, Object.assign({}, d, { date:today }), today); if(fuApply(r, '빠르게 두드리기 기록을 저장했습니다.')){ FUS.draft = null; FUS.view = 'home'; fuRender(); } return; }
+  if(a === 'rhythmStart') return fuRhythmStart();
+  if(a === 'saveRhythm'){ const d = FUS.draft; if(!d || d.type !== 'rhythm') return; const r = FU.addCheck(S.followup, Object.assign({}, d, { date:today }), today); if(fuApply(r, '박자 두드리기 기록을 저장했습니다.')){ FUS.draft = null; FUS.view = 'home'; fuRender(); } return; }
   if(a === 'saveVf'){ const d = FUS.draft; if(!d || d.type !== 'vf4') return; const r = FU.addCheck(S.followup, { type:'vf4', date:today, eye:d.eye, seen:d.seen, catch:d.catch, fw:d.fw }, today); if(fuApply(r, '간단 시야 기록을 저장했습니다.')){ FUS.draft = null; FUS.view = 'home'; fuRender(); } return; }
   if(a === 'discard'){ FUS.draft = null; return fuGo('home'); }
   if(a === 'saveSym'){
@@ -801,13 +869,11 @@ function fuOnClick(e){
     return;
   }
   if(a === 'saveCare'){ const r = FU.addCheck(S.followup, { type:'care', date:fuVal('fuDate'), items:fuChecked('data-care') }, today); if(fuApply(r, '기록했습니다.')){ FUS.view = 'home'; fuRender(); } return; }
-  if(a === 'saveLevel') return fuSaveLevel(b.dataset.kind);
   if(a === 'saveMeds'){
     const sel = document.querySelector('input[name="fuHormone"]:checked');
     const r = FU.setMeds(S.followup, sel ? sel.value : '', fuVal('fuMedDate'), today);
     if(fuApply(r, '기록했습니다.')){ FUS.view = 'home'; fuRender(); } return;
   }
-  if(a === 'tone') return fuTone(b.dataset.s);
   if(a === 'exportAsk'){ FUS.exportAsk = true; return fuRender(); }
   if(a === 'bkExport') return void fuBkExport();
   if(a === 'bkRead') return void fuBkRead();
@@ -821,6 +887,7 @@ function fuOnChange(e){
   if(t.id === 'fuRsFile'){ FUS.rs = null; FUS.bkSeq++; fuBkPreview(); const e = fuEl('fuRsPass'); if(e) e.value = ''; return fuBkSay('', true); }   // 새 파일 선택 — 이전 결과 무효
   if(t.id === 'fuLoc') return void fuApply(FU.setLoc(S.followup, t.value), '종양 위치를 바꿨습니다. 아래 체크 구성이 바뀝니다.');
   if(t.id === 'fuSide') return void fuApply(FU.setSide(S.followup, t.value), '치우친 쪽을 바꿨습니다. 정밀 시야검사 지도가 바뀌면 새 기준선을 만듭니다.');
+  if(t.id === 'fuHand') return void fuApply(FU.setHand(S.followup, t.value), '잘 쓰는 손을 저장했습니다. 좌우 차이를 이 손 기준으로 계산합니다.');
   if(t.id === 'fuNext') return void fuApply(FU.setNext(S.followup, t.value), t.value ? '다음 MRI 예정일을 저장했습니다.' : '다음 MRI 예정일을 지웠습니다.');
   if(t.id === 'fuCareOk'){ FUS.careOk = !!t.checked; const keep = fuChecked('data-sym'); fuRender(); document.querySelectorAll('#fuRoot [data-sym]').forEach(x => { if(keep.includes(x.getAttribute('data-sym'))) x.checked = true; }); const ck = fuEl('fuCareOk'); if(ck) ck.focus(); return; }
   if(t.hasAttribute && t.hasAttribute('data-sym')){
@@ -835,10 +902,10 @@ function fuOnChange(e){
   const st = fuEl('fuStage'); if(!st) return;
   fuEl('fuStageGo').addEventListener('click', () => {
     const t = FUS.test; if(!t) return;
-    if(t.kind === 'tap') fuTapCountdown(); else { fuEl('fuStageGo').hidden = true; fuVfNext(); }
+    if(t.kind === 'tap') fuTapCountdown(); else if(t.kind === 'rhythm') fuRhythmCountdown(); else { fuEl('fuStageGo').hidden = true; fuVfNext(); }
   });
   fuEl('fuStageCancel').addEventListener('click', () => fuCancelTest());
-  const onPointer = e => { e.preventDefault(); if(e.button > 0 || e.isPrimary === false) return; fuPress(); };   // 우클릭·보조 버튼·두 번째 접점은 세지 않음
-  fuEl('fuTapPad').addEventListener('pointerdown', onPointer);
-  fuEl('fuField').addEventListener('pointerdown', onPointer);
+  const onPointer = e => { e.preventDefault(); if(e.button > 0 || e.isPrimary === false) return; fuPress(false); };   // 우클릭·보조 버튼·두 번째 접점은 세지 않음
+  fuEl('fuTapPad').addEventListener('pointerdown', onPointer);   // 두드리기는 스페이스바만 세므로 여기 입력은 무시됨
+  fuEl('fuField').addEventListener('pointerdown', onPointer);    // 간단 시야는 화면 누르기도 받음
 })();

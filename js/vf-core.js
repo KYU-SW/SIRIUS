@@ -28,15 +28,17 @@ const VF = (() => {
     tnDrop:3,              // 귀쪽 − 코쪽(좌우 짝 평균)이 이 앱 점수 이상 더 벌어지면 변화
     urgentCentralDrop:10,  // 중심 평균이 이 앱 점수 이상 떨어지면 '큰 변화'
     urgentCluster:6,       // 나빠진 점이 이 개수 이상 붙어 있으면 '큰 변화'
-    focusDrop:6,           // (임시) 집중 구역의 한 점이 기준선보다 이 앱 점수 이상 낮으면
-    focusMin:2             // (임시) … 그런 집중 점이 이 개수 이상이면 변화 사유
+    focusDrop:6,           // 집중 구역의 한 점이 기준선보다 이 앱 점수 이상 낮으면 (실제로는 개인 흔들림 2×SD 와 큰 쪽)
+    focusMin:2             // … 그런 집중 점이 이 개수 이상이면 변화 사유 (집중 구역 3점 중 2점)
   });
   const RULE_LIMITS = Object.freeze({
     pointDrop:[3,15], clusterMin:2, centralDrop:[1,10], tnDrop:[1,10], urgentCentralDrop:[4,25], urgentCluster:[3,30],
     focusDrop:[3,15], focusMin:[1,3]
   });
-  /* 신뢰도 기준 */
-  const REL = Object.freeze({ fp:0.15, fl:0.33, fn:0.33, stray:0.15, strayMinTrials:20 });
+  /* 신뢰도 기준 (병원 자동시야계 기준: 거짓 양성 15%, 고정 손실 20%, 거짓 음성 33%) */
+  const REL = Object.freeze({ fp:0.15, fl:0.20, fn:0.33, stray:0.15, strayMinTrials:20 });
+  const UNSTABLE_THR = 12;   // 기준선 두 검사의 점별 흔들림 2×SD 가 이 앱 점수를 넘으면 '불안정' → 기준선을 다시 만들기를 권함
+  const CARD_TOL = 0.03;     // 카드 보정값(px)이 3% 넘게 다르면 다른 기기·화면으로 봄
   function sanitizeRules(r){
     const out = {};
     for(const k of Object.keys(RULES_DEFAULT)){
@@ -174,7 +176,7 @@ const VF = (() => {
     return { next, answer, discard, progress, finished, result, get pending(){ return pending; } };
   }
 
-  /* 신뢰도: 거짓 양성 >15%, 고정 손실 >33%, 거짓 음성 >33% 이면 신뢰하기 어려움 (시행 수가 충분할 때만).
+  /* 신뢰도: 거짓 양성 >15%, 고정 손실 >20%, 거짓 음성 >33% 이면 신뢰하기 어려움 (시행 수가 충분할 때만).
      과다 stray(빛이 없을 때·반응 시간 밖에서 누른 횟수)가 전체 시행의 15%를 넘어도(시행 20회 이상) 신뢰하기 어려움.
      st·tr 가 없는 예전 기록은 stray 기준을 적용하지 않습니다. */
   function isReliable(r){
@@ -259,22 +261,42 @@ const VF = (() => {
     const mine = (tests || []).filter(t => t.eye === eye);
     return mine.length ? (mine[mine.length - 1].mapId || LEGACY) : LEGACY;
   }
-  /* 비교 구간: 이 눈의 기록 중 끝에서부터 같은 mapId 가 이어진 기록들.
-     지도가 바뀌면(예전 지도로 돌아가도) 새 구간이 시작되어 기준선을 새로 만듭니다(1/2). */
+  /* 같은 기기·화면인가: 카드 보정값(px)이 3% 안이고 화면 크기(가로·세로, 회전 무시)가 같으면 같은 기기.
+     기기 정보가 없는 예전 기록은 같은 기기로 봅니다. */
+  function sameDev(a, b){
+    if(!a || !b) return true;
+    if(Math.abs(a.cardPx - b.cardPx) / Math.max(a.cardPx, b.cardPx) > CARD_TOL) return false;
+    const sa = [a.sw, a.sh].sort((x, y) => x - y), sb = [b.sw, b.sh].sort((x, y) => x - y);
+    return sa[0] === sb[0] && sa[1] === sb[1];
+  }
+  /* 비교 구간: 이 눈의 기록 중 끝에서부터 같은 mapId·같은 기기가 이어진 기록들.
+     지도나 기기가 바뀌면(예전 것으로 돌아가도) 새 구간이 시작되어 기준선을 새로 만듭니다(1/2). */
   function segmentOf(eye, tests){
     const all = (tests || []).filter(t => t.eye === eye);
-    const mapId = all.length ? (all[all.length - 1].mapId || LEGACY) : LEGACY;
-    let i = all.length;
-    while(i > 0 && (all[i - 1].mapId || LEGACY) === mapId) i--;
-    return { mapId, all, seg: all.slice(i) };
+    const lastT = all.length ? all[all.length - 1] : null;
+    const mapId = lastT ? (lastT.mapId || LEGACY) : LEGACY;
+    let i = all.length, devBreak = false;
+    while(i > 0 && (all[i - 1].mapId || LEGACY) === mapId){
+      if(!sameDev(all[i - 1].dev, lastT.dev)){ devBreak = true; break; }
+      i--;
+    }
+    return { mapId, all, seg: all.slice(i), devBreak };
+  }
+  /* 두 번 연속 변화가 '같은 곳'인가: 같은 사유(중심·귀쪽·집중 구역)이거나, 나빠진 점끼리 겹치거나 붙어 있음(8.5° 이내) */
+  function sameSpot(L, P, g){
+    for(const r of ['central', 'temporal', 'focus']) if(L.reasons.includes(r) && P.reasons.includes(r)) return true;
+    if(L.reasons.includes('cluster') && P.reasons.includes('cluster')){
+      for(const i of L.worseIdx) for(const j of P.worseIdx) if(i === j || Math.hypot(g[i].x - g[j].x, g[i].y - g[j].y) <= 8.5) return true;
+    }
+    return false;
   }
   function analyzeEye(eye, tests, rulesIn){
     const rules = sanitizeRules(rulesIn);
-    const { mapId, all, seg:mine } = segmentOf(eye, tests);           // 같은 지도 기록만 비교
+    const { mapId, all, seg:mine, devBreak } = segmentOf(eye, tests);   // 같은 지도·같은 기기 기록만 비교
     const rel = mine.filter(t => t.reliable);
     const map = VFMap.mapById(mapId, eye);
     const out = { eye, mapId, mapDesc:map.desc, zone:map.zone, nTests: mine.length, nAll: all.length, otherMap: all.length - mine.length,
-                  nReliable: rel.length, excluded: mine.length - rel.length,
+                  nReliable: rel.length, excluded: mine.length - rel.length, devBreak, unstable:false,
                   state:'none', level:0, follow:[], pattern:'none', trend:null, baseline:null, latest:null };
     if(!mine.length) return out;
     if(rel.length < 2) return { ...out, state:'baseline', need: 2 - rel.length };
@@ -284,12 +306,14 @@ const VF = (() => {
     const pooled = Math.sqrt(mean(d2) / 2);                  // 두 기준선 검사에서 본 점별 흔들림(SD)
     const nCentral = g.filter(p => p.central).length || 1;
     const bs = stats(eye, base, g);
-    const pointThr = Math.min(12, Math.max(rules.pointDrop, 2 * pooled));
+    const pointThr = Math.max(rules.pointDrop, 2 * pooled);          // 개인 흔들림을 반영 (상한 없음)
+    const focusThr = Math.max(rules.focusDrop, 2 * pooled);          // 집중 구역도 같은 방식
+    out.unstable = 2 * pooled > UNSTABLE_THR;                         // 너무 흔들리면 비교를 믿기 어려움 → 기준선 다시 만들기 안내
     const centralThr = Math.max(rules.centralDrop, 2.5 * pooled / Math.sqrt(nCentral));
     const tnThr = Math.max(rules.tnDrop, 2.5 * pooled * Math.sqrt(2 / Math.max(1, bs.nPairs)));
     const zoneIdx = g.map((p, i) => p.zone ? i : -1).filter(i => i >= 0);
     out.baseline = { ms:r1(bs.ms), central:r1(bs.central), temporal:r1(bs.temporal), nasal:r1(bs.nasal), tn:r1(bs.tn), focus:r1(bs.focus),
-                     pooledSd:r1(pooled), pointThr:r1(pointThr), dates:[rel[0].date, rel[1].date] };
+                     pooledSd:r1(pooled), pointThr:r1(pointThr), focusThr:r1(focusThr), dates:[rel[0].date, rel[1].date] };
 
     out.follow = rel.slice(2).map((t, k) => {
       const worse = [];
@@ -298,13 +322,13 @@ const VF = (() => {
       const dCentral = s.central - bs.central, dPeriph = s.periph - bs.periph;
       const dTN = s.tn - bs.tn;                                   // 짝으로 계산한 귀쪽−코쪽 차이의 변화
       const dFocus = s.focus == null ? null : s.focus - bs.focus;
-      const focusWorse = zoneIdx.filter(i => t.th[i] - base[i] <= -rules.focusDrop);
+      const focusWorse = zoneIdx.filter(i => t.th[i] - base[i] <= -focusThr);
       const cluster = clusterSize(eye, worse, g);
       const reasons = [];
       if(cluster >= rules.clusterMin) reasons.push('cluster');
       if(dCentral <= -centralThr) reasons.push('central');
       if(dTN <= -tnThr) reasons.push('temporal');
-      if(zoneIdx.length && focusWorse.length >= rules.focusMin) reasons.push('focus');   // 임시 기준 (임상 검증 전)
+      if(zoneIdx.length && focusWorse.length >= rules.focusMin) reasons.push('focus');
       const severe = dCentral <= -rules.urgentCentralDrop || cluster >= rules.urgentCluster;
       return {
         pos:k + 2, date:t.date, ms:r1(s.ms), dMs:r1(s.ms - bs.ms), central:r1(s.central), dCentral:r1(dCentral),
@@ -315,7 +339,7 @@ const VF = (() => {
     out.latest = out.follow[out.follow.length - 1] || null;
     const L = out.latest, P = out.follow[out.follow.length - 2];
     if(!L){ out.state = 'tracking'; out.level = 0; }
-    else if(L.worse && P && P.worse){ out.state = 'confirmed'; out.level = L.severe ? 3 : 2; }
+    else if(L.worse && P && P.worse && sameSpot(L, P, g)){ out.state = 'confirmed'; out.level = L.severe ? 3 : 2; }   // 2번 연속 + 같은 곳
     else if(L.worse){ out.state = 'recheck'; out.level = L.severe ? 2 : 1; }
     else { out.state = 'stable'; out.level = 0; }
     if(L && L.worse){
@@ -400,6 +424,14 @@ const VF = (() => {
     return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s && s >= '2020-01-01' && s <= '2100-12-31';
   }
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  /* 기기 정보: 카드 보정 px, 화면 가로·세로(CSS px), 배율. 잘못된 값이면 기기 정보 없음으로 봄 */
+  function cleanDev(d){
+    if(!d || typeof d !== 'object') return null;
+    if(!int(d.cardPx, 100, 3000) || !int(d.sw, 200, 20000) || !int(d.sh, 200, 20000)) return null;
+    const out = { cardPx:d.cardPx, sw:d.sw, sh:d.sh };
+    if(typeof d.dpr === 'number' && Number.isFinite(d.dpr) && d.dpr >= 0.25 && d.dpr <= 8) out.dpr = Math.round(d.dpr * 100) / 100;
+    return out;
+  }
   function cleanState(raw){
     if(!raw || typeof raw !== 'object' || raw.app !== 'sirius-vf' || raw.v !== 1) throw new Error('형식');
     if(!Array.isArray(raw.tests) || raw.tests.length > MAX_TESTS) throw new Error('검사 수');
@@ -425,7 +457,9 @@ const VF = (() => {
         rel.st = r.st; rel.tr = r.tr;
       }
       const dist = int(t.dist, 20, 80) ? t.dist : null;
-      return { date:t.date, eye:t.eye, mapId, pts:VFMap.ptsOf(map), th:t.th.slice(), un:[...new Set(un)].sort((x, y) => x - y), rel, reliable:isReliable(rel), dist };
+      const out = { date:t.date, eye:t.eye, mapId, pts:VFMap.ptsOf(map), th:t.th.slice(), un:[...new Set(un)].sort((x, y) => x - y), rel, reliable:isReliable(rel), dist };
+      const dev = cleanDev(t.dev); if(dev) out.dev = dev;              // 기기 정보 (새 기록만)
+      return out;
     });
     const symptoms = (Array.isArray(raw.symptoms) ? raw.symptoms : []).slice(0, MAX_SYMPTOM_LOGS).map(s => {
       if(!s || !validDate(s.date) || !Array.isArray(s.ids)) throw new Error('증상 항목');
@@ -435,7 +469,7 @@ const VF = (() => {
   }
   const exportable = state => ({
     app:'sirius-vf', v:1,
-    tests: state.tests.map(t => ({ date:t.date, eye:t.eye, mapId:t.mapId || LEGACY, pts:t.pts || VFMap.ptsOf(mapOf(t)), th:t.th, un:t.un, rel:t.rel, dist:t.dist })),
+    tests: state.tests.map(t => Object.assign({ date:t.date, eye:t.eye, mapId:t.mapId || LEGACY, pts:t.pts || VFMap.ptsOf(mapOf(t)), th:t.th, un:t.un, rel:t.rel, dist:t.dist }, t.dev ? { dev:t.dev } : {})),
     symptoms: state.symptoms,
     rules: state.rules
   });
@@ -448,7 +482,7 @@ const VF = (() => {
   };
   const fmt = v => v == null ? '–' : (v > 0 ? '+' : '') + v;
   const ZONE_KO = Object.freeze({ 'temporal-upper':'귀쪽 위', central:'중심' });
-  const focusDropLabel = L => `${UNIT} 6 이상 낮은 집중 점 ${L.nFocusWorse}/3`;
+  const focusDropLabel = (L, thr) => `${UNIT} ${thr} 이상 낮은 집중 점 ${L.nFocusWorse}/3`;
   function questions(a){
     const q = [
       '이 시야 기록의 변화가 최근 MRI 경과와 맞는지 알려 주세요.',
@@ -475,13 +509,14 @@ const VF = (() => {
       const e = a[eye];
       const tag = `${EYE_KO[eye]} [지도 ${e.mapId}]`;
       if(!e.nAll){ lines.push(`${EYE_KO[eye]}: 검사 기록 없음`); continue; }
-      const other = e.otherMap ? ` · 다른 지도 기록 ${e.otherMap}회는 비교에서 뺐습니다` : '';
+      const other = e.otherMap ? ` · 다른 지도·기기 기록 ${e.otherMap}회는 비교에서 뺐습니다` : '';
       if(e.state === 'baseline'){ lines.push(`${tag}: 기준선 측정 중 (신뢰할 수 있는 검사 ${e.nReliable}/2)${other}`); continue; }
       const L = e.latest;
       lines.push(`${tag}: 기준선 평균 ${e.baseline.ms}, 중심 10° ${e.baseline.central}, 귀쪽−코쪽 ${fmt(e.baseline.tn)}${e.baseline.focus != null ? `, 집중 구역(${ZONE_KO[e.zone]}) ${e.baseline.focus}` : ''} (${UNIT}, 기준선 흔들림 SD ${e.baseline.pooledSd})${other}`);
+      if(e.unstable) lines.push(`  기준선 두 검사의 흔들림이 커서(점별 SD ${e.baseline.pooledSd}) 비교를 믿기 어렵습니다. 같은 조건에서 기준선을 다시 만들어 주세요.`);
       if(L){
-        lines.push(`  최근(${L.date}) 평균 ${L.ms} (${fmt(L.dMs)}), 중심 ${L.central} (${fmt(L.dCentral)}), 귀쪽−코쪽 차이 변화 ${fmt(L.dTN)}${L.dFocus != null ? `, 집중 구역 변화 ${fmt(L.dFocus)} (${focusDropLabel(L)})` : ''}, 나빠진 점 ${L.nWorse}개 (붙은 최대 ${L.cluster}개)`);
-        if(L.reasons.includes('focus')) lines.push(`  임시 변화 사유: 집중 구역 점 ${L.nFocusWorse}개가 기준선보다 ${UNIT} 6 이상 낮습니다 (임상 검증 전 임시 기준)`);
+        lines.push(`  최근(${L.date}) 평균 ${L.ms} (${fmt(L.dMs)}), 중심 ${L.central} (${fmt(L.dCentral)}), 귀쪽−코쪽 차이 변화 ${fmt(L.dTN)}${L.dFocus != null ? `, 집중 구역 변화 ${fmt(L.dFocus)} (${focusDropLabel(L, e.baseline.focusThr)})` : ''}, 나빠진 점 ${L.nWorse}개 (붙은 최대 ${L.cluster}개)`);
+        if(L.reasons.includes('focus')) lines.push(`  변화 사유: 집중 구역 점 ${L.nFocusWorse}개가 기준선보다 ${UNIT} ${e.baseline.focusThr} 이상 낮습니다 (개인 흔들림 반영)`);
         if(e.pattern !== 'none') lines.push(`  양상: ${PATTERN_KO[e.pattern]}`);
       } else lines.push('  기준선 이후 검사 없음');
       if(e.trend) lines.push(`  추세: 평균 ${fmt(e.trend.msPerMonth)}/월, 중심 ${fmt(e.trend.centralPerMonth)}/월 (${UNIT})${e.trend.declining ? ' (감소 추세)' : ''}`);
@@ -502,7 +537,7 @@ const VF = (() => {
       const pts = segmentOf(eye, tests).seg.map(t => ({ date:t.date, v:r1(statsOf(t).ms), unreliable:!t.reliable }));
       const L = e.latest;
       out.push({
-        eye, mapId:e.mapId, zone:e.zone, zoneKo:e.zone ? ZONE_KO[e.zone] : '', state:e.state, nTests:e.nTests, nReliable:e.nReliable, otherMap:e.otherMap,
+        eye, mapId:e.mapId, zone:e.zone, zoneKo:e.zone ? ZONE_KO[e.zone] : '', state:e.state, nTests:e.nTests, nReliable:e.nReliable, otherMap:e.otherMap, unstable:e.unstable, devBreak:!!e.devBreak,
         baseline:e.baseline, pts,
         latest: L ? { date:L.date, ms:L.ms, dMs:L.dMs, dTN:L.dTN, dFocus:L.dFocus, nFocusWorse:L.nFocusWorse, worse:L.worse, reasons:L.reasons.slice() } : null
       });
@@ -514,6 +549,6 @@ const VF = (() => {
     DB_MIN, DB_MAX, BG_LEVEL, STIM, CARD_MM, BLIND, RULES_DEFAULT, REL, UNIT, SYMPTOMS, LEVEL, PENDING, EYE_KO, PATTERN_KO, ZONE_KO, LEGACY,
     sanitizeRules, grid, mapOf, pointsOf, blindCenter, degToMm, toPx, sizePx, pxPerMmFromCard, fitCheck, dbToLevel,
     createTest, isReliable, relProblems, pct, stats, statsOf, analyzeEye, currentMapId, segmentOf, assess, symptomLevel, dayNum, validDate,
-    cleanState, exportable, buildSummary, questions, digest, r1, fmt
+    cleanState, cleanDev, sameDev, exportable, buildSummary, questions, digest, r1, fmt
   });
 })();
