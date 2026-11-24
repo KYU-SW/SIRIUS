@@ -55,7 +55,7 @@
   <section class="features" id="about">
     <div class="feature">
       <span class="fico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h10M4 17h7"/></svg></span>
-      <div><h4>위치 맞춤 경과 관찰</h4><p>종양 위치에 따라 시야·손가락·청력·후각 등 필요한 체크가 정해지고, 첫 기록을 기준점으로 달라진 점만 비교합니다.</p></div>
+      <div><h4>위치 맞춤 경과 관찰</h4><p>종양 위치에 따라 정밀 시야검사·빠르게 두드리기·박자 두드리기 중 필요한 검사와 증상 기록이 정해지고, 내 기준점보다 나빠진 점만 비교합니다.</p></div>
     </div>
     <div class="feature">
       <span class="fico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg></span>
@@ -224,7 +224,7 @@
             <button type="button" class="linkbtn agview" aria-expanded="false" aria-controls="txtTos">보기</button>
           </div>
           <div class="terms" id="txtTos" hidden>
-            <p><b>제1조 (서비스의 성격)</b><br>SIRIUS는 뇌 MRI 영상에서 눈여겨볼 부분을 찾아 쉬운 말로 설명하고, 진료실에서 물어볼 질문을 정리해 주는 <b>학습·이해용 도구</b>이며, 수막종 경과 관찰 중인 분이 집에서 하는 간단한 자가 기록(경과 관찰)을 돕습니다.</p>
+            <p><b>제1조 (서비스의 성격)</b><br>SIRIUS는 <b>수막종 경과 관찰(watch-and-wait) 중인 분이 MRI 사이 기간에 집에서 하는 자가 기록</b>을 돕는 도구입니다. 종양 위치에 맞춘 시야·손 기능 검사와 증상 기록을 내 기준점과 비교해 진료 때 보여 줄 요약을 만들고, 보조 기능으로 뇌 MRI 영상에서 눈여겨볼 부분을 쉬운 말로 설명합니다. 진단이나 의학적 판단을 하지 않는 <b>학습·이해용 도구</b>입니다.</p>
             <p><b>제2조 (의료행위가 아님)</b><br>본 서비스는 의료기기가 아니며 진단·치료·처방을 하지 않습니다. 분석 결과를 근거로 치료를 시작하거나 중단해서는 안 되며, 모든 의학적 판단은 담당 의사와 함께 하셔야 합니다.</p>
             <p><b>제3조 (정확성의 한계)</b><br>분석 결과는 참고용이며 정확성을 보장하지 않습니다. 영상 한 장만을 보고 계산하므로 실제 소견과 다를 수 있습니다.</p>
             <p><b>제4조 (이용자의 의무)</b><br>본인 또는 정당한 권한이 있는 영상만 올려야 합니다. 타인의 의료 영상을 동의 없이 올리는 것은 금지됩니다.</p>
@@ -744,7 +744,7 @@
     <p id="fuStageMsg" role="status" aria-live="polite"></p>
     <div id="fuStageCount" class="fu-count" aria-live="off"></div>
     <button class="btn primary" id="fuStageGo" hidden></button>
-    <button type="button" id="fuTapPad" class="fu-pad" hidden aria-label="여기를 두드리세요 (스페이스바도 됩니다)">두드리세요</button>
+    <button type="button" id="fuTapPad" class="fu-pad" hidden aria-label="두드리기는 스페이스바로만 셉니다">두드리세요</button>
     <div id="fuField" class="fu-field" data-stim="" hidden aria-label="가운데 점을 보세요"><span class="fu-fix"></span><span class="fu-stim"></span></div>
     <button class="btn ghost" id="fuStageCancel">중단 (Esc) — 이번 검사는 기록하지 않음</button>
   </div>
