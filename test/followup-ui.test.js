@@ -178,7 +178,7 @@ test('빠르게 두드리기: 스페이스바로 손마다 10초 × 3번(사이 
   assert.match(t.html(), /기준점 완료/);
   t.press('go', { v:'tapIntro' }); t.press('tapStart'); runTap(t, [[12, 12, 12], [12, 12, 12]]); t.press('saveTap'); await t.flush();
   assert.match(t.html(), /비슷함/, '빨라진 것은 변화가 아님'); assert.doesNotMatch(t.html(), /변화 있음/);
-  t.press('go', { v:'tapIntro' }); t.press('tapStart'); runTap(t, [[3, 3, 3], [8, 8, 8]]); t.press('saveTap'); await t.flush();
+  t.press('go', { v:'tapIntro' }); t.press('tapStart'); runTap(t, [[5, 5, 5], [8, 8, 8]]); t.press('saveTap'); await t.flush();
   assert.match(t.html(), /변화 있음/);
 });
 test('빠르게 두드리기: 10초에 70회를 넘으면 그 회차를 저장하지 않고 다시 한다', () => {
@@ -822,4 +822,20 @@ test('박자 두드리기: 두 번 눌림·멈춤이 많으면 저장 버튼 없
   assert.match(t.html(), /다시 해 주세요/); assert.doesNotMatch(t.html(), /data-fu="saveRhythm"/);
   t.press('saveRhythm'); await t.flush(); assert.equal(t.state().checks.length, 0);
   let p = 0; t.winH.beforeunload({ preventDefault(){ p++; } }); assert.equal(p, 1, '저장하지 않은 결과가 있으면 닫기 경고');
+});
+
+test('빠르게 두드리기: 키보드 없이 화면만 누르면(5회 미만) 그 회차를 다시 하고 0회가 저장되지 않는다', () => {
+  const t = build(); t.enter(); t.press('tapStart');
+  t.node('fuStageGo').h.click(); t.advance(3000);
+  for(let i = 0; i < 20; i++){ t.advance(100); t.node('fuTapPad').h.pointerdown({ preventDefault(){} }); }
+  t.advance(10000);
+  assert.equal(t.ev('FUS.test.phase'), 'ready'); assert.match(t.node('fuStageMsg').textContent, /0회만 눌려[^]*스페이스바[^]*왼손 1\/3번째/);
+  assert.equal(t.ev('FUS.test.res.L.length'), 0);
+});
+test('잘 쓰는 손이 "모름"이면 결과에 오른손 기준으로 계산했다고 알린다', () => {
+  const t = build(); t.enter();
+  t.ev("FUS.draft = FU.tapRecord([48, 50, 49], [54, 53, 55]); FUS.view = 'tapDone'; fuRender()");
+  assert.match(t.html(), /오른손<\/b>을 잘 쓰는 손으로 보고 계산/);
+  t.ev("S.followup = FU.setHand(S.followup, 'left').state; fuRender()");
+  assert.doesNotMatch(t.html(), /잘 쓰는 손으로 보고 계산/);
 });

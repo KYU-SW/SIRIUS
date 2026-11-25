@@ -91,8 +91,8 @@ test('체크 기록 검증: 형식·범위·미래 날짜·알 수 없는 항목
 });
 
 test('손가락 두드리기 측정: 10초 밖·잘못된 값 제외, 30ms 중복 제거, 6번 미만이면 리듬 없음', () => {
-  same({ ...FU.tapMetrics([]) }, { n:0, cv:null, over:false });
-  same({ ...FU.tapMetrics('x') }, { n:0, cv:null, over:false });
+  same({ ...FU.tapMetrics([]) }, { n:0, cv:null, over:false, under:true });
+  same({ ...FU.tapMetrics('x') }, { n:0, cv:null, over:false, under:true });
   assert.equal(FU.tapMetrics([0, 100, 200, 300, 400]).cv, null);
   const reg = FU.tapMetrics([0, 200, 400, 600, 800, 1000, 1200]);
   assert.equal(reg.n, 7); assert.equal(reg.cv, 0);
@@ -420,4 +420,13 @@ test('잘 쓰는 손과 주의할 손: 빠르게 두드리기는 종양 반대�
   assert.ok(FU.compare(x, 'tap').reasons.some(r => /오른손이 왼손보다 상대적으로 느려짐/.test(r)));
   const m = FU.summary(ok(FU.setHand(x, 'left')), TODAY);
   assert.equal(m.handKo, '왼손'); assert.equal(m.compare.find(c => c.key === 'tap').watchKo, '오른손');
+});
+
+test('두드리기: 10초 5회 미만(키보드 없이 화면만 누름 등)은 측정 오류로 거절하고, 예전 기록 중 5회 미만은 기준점에서 뺀다', () => {
+  assert.equal(FU.tapMetrics([0, 500, 1000, 1500]).under, true); assert.equal(FU.tapMetrics([0, 500, 1000, 1500, 2000]).under, false);
+  assert.match(FU.addCheck(FU.empty(), tap('2026-01-01', 0, 50), TODAY).error, /5회 미만/);
+  assert.equal(FU.addCheck(FU.empty(), tap('2026-01-01', 5, 5), TODAY).ok, true);
+  const old = FU.clean({ v:1, checks:[tap('2026-01-01', 0, 0), tap('2026-01-02', 50, 52), tap('2026-01-03', 48, 50)] }, TODAY);
+  assert.equal(old.checks.length, 3, '예전 기록은 지우지 않음');
+  const c = FU.compare(old, 'tap'); assert.equal(c.n, 2); assert.equal(c.base.L.n, 49, '0회 기록은 기준점에 섞이지 않음');
 });
