@@ -92,14 +92,15 @@ function vfAssess(){ return VF.assess({ tests:VFS.tests, symptoms:VFS.symptoms, 
 function vfEyeLine(e){
   const nm = VF.EYE_KO[e.eye];
   if(!e.nAll) return `<li><b>${nm}</b> · 아직 검사가 없습니다. (기준선 0/2)</li>`;
-  const other = e.otherMap ? ` 다른 지도 기록 ${e.otherMap}회는 비교에서 뺐습니다.` : '';
+  const other = (e.otherMap ? ` 다른 지도·기기 기록 ${e.otherMap}회는 비교에서 뺐습니다.` : '')
+              + (e.unstable ? ' <b>기준선 두 검사의 흔들림이 커서 비교를 믿기 어렵습니다. 같은 조건에서 기준선을 다시 만들어 주세요.</b>' : '');
   const map = ` <span class="tiny">[지도 ${esc(e.mapId)}]</span>`;
-  if(e.state === 'baseline') return `<li><b>${nm}</b>${map} · ${e.otherMap ? '지도가 바뀌어 새 기준선' : '기준선'} 측정 중 (신뢰할 수 있는 검사 ${e.nReliable}/2). 같은 조건에서 ${e.need}번 더 하세요.${e.excluded ? ` 신뢰도 낮은 검사 ${e.excluded}회는 제외했습니다.` : ''}${other}</li>`;
+  if(e.state === 'baseline') return `<li><b>${nm}</b>${map} · ${e.devBreak ? '기기(화면)가 바뀌어 새 기준선' : e.otherMap ? '지도가 바뀌어 새 기준선' : '기준선'} 측정 중 (신뢰할 수 있는 검사 ${e.nReliable}/2). 같은 조건에서 ${e.need}번 더 하세요.${e.excluded ? ` 신뢰도 낮은 검사 ${e.excluded}회는 제외했습니다.` : ''}${other}</li>`;
   const L = e.latest;
   if(!L) return `<li><b>${nm}</b>${map} · 기준선 완료 (평균 ${e.baseline.ms}, 중심 ${e.baseline.central} ${VU}). 이제부터 변화를 비교합니다.${other}</li>`;
   const st = { stable:'기준선과 비슷', recheck:'나빠진 결과 1회 — 재검 필요', confirmed:'나빠진 결과 반복' }[e.state] || '';
   return `<li><b>${nm}</b>${map} · ${st} · 최근 ${esc(L.date)} 평균 ${VF.fmt(L.dMs)}, 중심 ${VF.fmt(L.dCentral)}, 귀쪽−코쪽 ${VF.fmt(L.dTN)}${L.dFocus != null ? `, 집중 구역 ${VF.fmt(L.dFocus)}` : ''} (${VU})`
-       + `${L.reasons.includes('focus') ? ' · <b>임시 변화 사유: 집중 점 ' + L.nFocusWorse + '개 6점 이상 하락</b>' : ''}`
+       + `${L.reasons.includes('focus') ? ' · <b>변화 사유: 집중 점 ' + L.nFocusWorse + '개 ' + e.baseline.focusThr + '점 이상 하락</b>' : ''}`
        + `${e.pattern !== 'none' ? ' · ' + VF.PATTERN_KO[e.pattern] : ''}${e.trend && e.trend.declining ? ' · 서서히 낮아지는 추세' : ''}</li>`;
 }
 function vfRenderStatus(){
@@ -152,7 +153,7 @@ function vfRenderHistory(){
 const RULE_LABEL = {
   pointDrop:`한 점이 나빠졌다고 보는 최소 하락(${VU})`, clusterMin:'붙어 있는 나빠진 점의 최소 개수', centralDrop:`중심 10° 평균 하락(${VU})`,
   tnDrop:`귀쪽−코쪽 차이 하락(${VU}, 좌우 짝)`, urgentCentralDrop:`‘큰 변화’로 보는 중심 하락(${VU})`, urgentCluster:'‘큰 변화’로 보는 붙은 점 개수',
-  focusDrop:`(임시) 집중 점 하락(${VU})`, focusMin:'(임시) 하락한 집중 점의 최소 개수'
+  focusDrop:`집중 점 하락 최소값(${VU}, 개인 흔들림 2×SD 가 더 크면 그 값)`, focusMin:'하락한 집중 점의 최소 개수'
 };
 function vfRenderRules(){
   vfEl('vfRules').innerHTML = Object.keys(RULE_LABEL).map(k =>
@@ -250,7 +251,7 @@ function vfStartStage(){
   const stage = vfEl('vfStage');
   stage.hidden = false;
   const map = vfMapNow();
-  vfRun = { T:VF.createTest({ eye:VFS.eye, map }), eye:VFS.eye, map, distMm, ppm:cal.ppm, g:null, dpr:Math.min(2, window.devicePixelRatio || 1), size:{ w:0, h:0 },
+  vfRun = { T:VF.createTest({ eye:VFS.eye, map }), eye:VFS.eye, map, distMm, ppm:cal.ppm, cardPx:cal.cardPx, g:null, dpr:Math.min(2, window.devicePixelRatio || 1), size:{ w:0, h:0 },
             timers:[], trial:null, onset:0, responded:false, stray:0, paused:false, started:false, t0:0 };
   vfSizeCanvas(vfRun);
   vfPaint(null); vfHud();
@@ -348,6 +349,10 @@ function vfFinish(){
   vfTeardown();
   const rel = { ...res.rel, st:Math.min(5000, stray), tr:Math.min(5000, res.rel.tr) };   // stray(빛 없이 누름)도 신뢰도에 반영
   const rec = { date:vfToday(), eye:res.eye, mapId:res.mapId, pts:res.pts, th:res.th, un:res.un, rel, reliable:VF.isReliable(rel), dist:distCm };
+  /* 기기 정보: 기기가 바뀌면 같은 기준선과 비교하지 않고 새 기준선을 만듭니다 */
+  const scr = (typeof screen !== 'undefined' && screen) ? screen : {};
+  const dev = VF.cleanDev({ cardPx:Math.round(r.cardPx), sw:Math.round(scr.width || window.innerWidth), sh:Math.round(scr.height || window.innerHeight), dpr:window.devicePixelRatio || 1 });
+  if(dev) rec.dev = dev;
   VFS.tests.push(rec); VFS.last = VFS.tests.length - 1;
   vfShow('result'); vfRenderResult(VFS.last, { stray, secs });
   vfPersist();                                                   // 암호화해 계정 금고에 자동 저장
@@ -389,17 +394,17 @@ function vfRenderResult(i, meta){
   const p = k => VF.pct(rel[k], rel[k + 'N']);
   const lines = [
     `거짓 신호(빛이 없는데 누름) ${p('fp') == null ? '–' : p('fp') + '%'} (${rel.fp}/${rel.fpN}) · 기준 15% 이하`,
-    `고정 흔들림(맹점 확인 자극에 반응) ${p('fl') == null ? '–' : p('fl') + '%'} (${rel.fl}/${rel.flN})`,
-    `놓침 확인(아주 밝은 자극을 놓침) ${p('fn') == null ? '–' : p('fn') + '%'} (${rel.fn}/${rel.fnN})`
+    `고정 흔들림(맹점 확인 자극에 반응) ${p('fl') == null ? '–' : p('fl') + '%'} (${rel.fl}/${rel.flN}) · 기준 20% 이하`,
+    `놓침 확인(아주 밝은 자극을 놓침) ${p('fn') == null ? '–' : p('fn') + '%'} (${rel.fn}/${rel.fnN}) · 기준 33% 이하`
   ];
   if(Number.isInteger(rel.st) && Number.isInteger(rel.tr)) lines.push(`빛이 없을 때 누른 횟수 ${rel.st}회 / 전체 시행 ${rel.tr}회${rel.tr ? ` (${Math.round(100 * rel.st / rel.tr)}%)` : ''} · 기준 15% 이하`);
   let change = '<p class="tiny">신뢰도가 낮은 검사라 기준선과 비교하지 않았습니다.</p>';
   if(t.reliable){
-    if(!inSeg) change = `<p class="tiny">지금 비교에 쓰는 지도(${esc(an.mapId)})와 다른 지도(${esc(map.mapId)})의 기록이라 비교하지 않았습니다.</p>`;
+    if(!inSeg) change = `<p class="tiny">지금 비교에 쓰는 기록(지도 ${esc(an.mapId)})과 다른 지도·기기(${esc(map.mapId)})의 기록이라 비교하지 않았습니다.</p>`;
     else if(an.state === 'baseline') change = `<p>이 검사는 <b>기준선 검사</b>로 쓰입니다 (${an.nReliable}/2). 같은 조건에서 ${an.need}번 더 하면 변화 비교가 시작됩니다.</p>`;
     else if(pos === 0 || pos === 1) change = `<p>이 검사는 <b>기준선 검사</b>입니다 (${pos + 1}/2).</p>`;
     else if(fol) change = `<p>기준선 대비 평균 ${VF.fmt(fol.dMs)}, 중심 10° ${VF.fmt(fol.dCentral)}, 귀쪽−코쪽(짝) ${VF.fmt(fol.dTN)}${fol.dFocus != null ? `, 집중 구역(${esc(VF.ZONE_KO[map.zone])}) ${VF.fmt(fol.dFocus)}` : ''} (${VU}), 나빠진 점 ${fol.nWorse}개 (붙은 최대 ${fol.cluster}개). `
-         + `${fol.reasons.includes('focus') ? `<b>임시 변화 사유:</b> 집중 점 ${fol.nFocusWorse}개가 기준선보다 6점 이상 낮습니다(임상 검증 전 임시 기준). ` : ''}`
+         + `${fol.reasons.includes('focus') ? `<b>변화 사유:</b> 집중 점 ${fol.nFocusWorse}개가 기준선보다 ${an.baseline.focusThr}점 이상 낮습니다(개인 흔들림 반영). ` : ''}`
          + `${fol.worse ? '<b>기준선보다 나빠진 양상입니다.</b>' : '기준선과 비슷합니다.'}</p>`;
   }
   const saveNote = VFS.save === 'ok' || VFS.save === 'saving'

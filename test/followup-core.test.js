@@ -21,13 +21,15 @@ test('종양 위치는 6개 + 모름이고 위치마다 체크 구성이 다르�
   const cores = new Set(FU.LOCS.map(l => FU.setupFor(l.id).core.join()));
   assert.ok(cores.size >= 5, '위치별 구성이 거의 같음');
   assert.equal(FU.setupFor('sellar').core[0], 'vf4');
-  same(FU.setupFor('cpa').core.slice(0, 1), ['hear']);
-  assert.ok(FU.setupFor('olfactory').core.includes('smell') && FU.setupFor('olfactory').core.includes('care'));
-  assert.ok(FU.setupFor('parasagittal').core.includes('tap'));
+  same(FU.setupFor('cpa').core.slice(0, 1), ['rhythm'], '소뇌교각: 박자 두드리기');
+  assert.equal(FU.setupFor('cpa').watch, 'ipsi');
+  assert.ok(!FU.setupFor('olfactory').core.includes('smell') && FU.setupFor('olfactory').core.includes('care'), '후각구: 측정 검사 없음(증상·보호자)');
+  assert.ok(FU.setupFor('parasagittal').core.includes('tap')); assert.equal(FU.setupFor('parasagittal').watch, 'contra');
+  assert.ok(FU.setupFor('unknown').core.includes('tap') && FU.setupFor('unknown').precise);
   same(FU.setupFor('없는위치').loc, 'unknown');
   for(const l of FU.LOCS){
     const c = FU.setupFor(l.id);
-    same([...c.core, ...c.extra].sort(), [...FU.TYPES].sort());
+    same([...c.core, ...c.extra].sort(), [...FU.ACTIVE_TYPES].sort(), '후각·청력 검사는 새로 권하지 않음');
     assert.equal(c.sym.filter(i => i.em).length, 5, '응급 증상 5개는 모든 위치에 항상 포함');
   }
 });
@@ -89,16 +91,20 @@ test('체크 기록 검증: 형식·범위·미래 날짜·알 수 없는 항목
 });
 
 test('손가락 두드리기 측정: 10초 밖·잘못된 값 제외, 30ms 중복 제거, 6번 미만이면 리듬 없음', () => {
-  same({ ...FU.tapMetrics([]) }, { n:0, cv:null });
-  same({ ...FU.tapMetrics('x') }, { n:0, cv:null });
+  same({ ...FU.tapMetrics([]) }, { n:0, cv:null, over:false });
+  same({ ...FU.tapMetrics('x') }, { n:0, cv:null, over:false });
   assert.equal(FU.tapMetrics([0, 100, 200, 300, 400]).cv, null);
   const reg = FU.tapMetrics([0, 200, 400, 600, 800, 1000, 1200]);
   assert.equal(reg.n, 7); assert.equal(reg.cv, 0);
   assert.equal(FU.tapMetrics([100, 110, 120, 500, NaN, -5, 10001, 'a', null, Infinity]).n, 2, '30ms 안 중복·범위 밖·비숫자 제외');
   const irr = FU.tapMetrics([0, 100, 500, 560, 1100, 1180, 2000]);
   assert.ok(irr.cv > 30);
-  assert.equal(FU.tapMetrics(Array.from({ length: 1000 }, (_, i) => i * 10)).n, 300, '한도');
-  assert.equal(FU.tapLR({ L:{ n:50 }, R:{ n:40 } }), 20);
+  assert.equal(FU.tapMetrics(Array.from({ length: 1000 }, (_, i) => i * 10)).over, true, '70회 초과는 측정 오류');
+  assert.equal(FU.tapMetrics(Array.from({ length: 70 }, (_, i) => i * 140)).over, false, '70회까지는 정상 측정');
+  assert.equal(FU.tapMetrics(Array.from({ length: 71 }, (_, i) => i * 140)).over, true);
+  assert.equal(FU.tapLR({ L:{ n:45 }, R:{ n:50 } }), 10, '오른손잡이: (오른손 − 왼손) ÷ 오른손');
+  assert.equal(FU.tapLR({ L:{ n:50 }, R:{ n:45 } }, 'left'), 10, '왼손잡이: (왼손 − 오른손) ÷ 왼손');
+  assert.equal(FU.tapLR({ L:{ n:50 }, R:{ n:40 } }), -25, '잘 쓰는 손이 더 느리면 음수');
   assert.equal(FU.tapLR({ L:{ n:0 }, R:{ n:0 } }), null);
 });
 
@@ -118,17 +124,20 @@ test('간단 시야 계획·점수: 4방향×3번 + 확인용 2번, 눌림 집�
   same({ ...FU.vfScore(null).seen }, { u:0, d:0, l:0, r:0 });
 });
 
-test('기준점 비교: 첫 측정이 기준점, 이후 비슷함/변화 있음만 말하고 이유를 숫자로 보여 준다', () => {
+test('기준점 비교(두드리기): 처음 2회 평균이 기준점, 나빠지는 방향만 변화로 보고 이유를 숫자로 보여 준다', () => {
   let s = FU.empty();
   assert.equal(FU.compare(s, 'tap').state, 'none');
   s = add(s, tap('2026-01-01', 50, 52));
-  assert.equal(FU.compare(s, 'tap').state, 'baseline');
+  let c = FU.compare(s, 'tap'); assert.equal(c.state, 'baseline'); assert.equal(c.need, 1, '1회만으로는 비교하지 않음');
+  s = add(s, tap('2026-01-02', 48, 54));
+  c = FU.compare(s, 'tap'); assert.equal(c.state, 'baseline'); assert.equal(c.need, 0);
+  assert.equal(c.base.L.n, 49); assert.equal(c.base.R.n, 53); same([...c.base.ids], [1, 2], '기준점 = 처음 2회 평균');
   s = add(s, tap('2026-02-01', 48, 53));
-  const c = FU.compare(s, 'tap'); assert.equal(c.state, 'same'); same([...c.reasons], []);
-  s = add(s, tap('2026-03-01', 35, 52));
+  c = FU.compare(s, 'tap'); assert.equal(c.state, 'same'); same([...c.reasons], []);
+  s = add(s, tap('2026-03-01', 34, 52));
   const c2 = FU.compare(s, 'tap');
   assert.equal(c2.state, 'changed'); assert.equal(c2.streak, 1); assert.equal(c2.repeated, false);
-  assert.match(c2.reasons[0], /왼손 두드린 횟수 50회 → 35회/); assert.ok(c2.reasons.some(r => /좌우 차이/.test(r)));
+  assert.match(c2.reasons[0], /왼손 두드린 횟수 줄어듦 49회 → 34회/); assert.ok(c2.reasons.some(r => /왼손이 오른손보다 상대적으로 느려짐/.test(r)));
   s = add(s, tap('2026-04-01', 34, 52));
   assert.equal(FU.compare(s, 'tap').repeated, true, '변화가 이어짐');
   s = add(s, tap('2026-05-01', 50, 52));
@@ -158,9 +167,12 @@ test('증상·보호자·후각·청력도 기준점과 비교한다 (새로 체
   assert.equal(FU.compare(s, 'sym').state, 'same');
   s = add(s, { type:'sym', date:'2026-03-01', items:['vis1', 'dip'] });
   assert.match(FU.compare(s, 'sym').reasons[0], /새로 체크함: 물체가 겹쳐 보임/);
-  s = add(s, { type:'smell', date:'2026-01-01', L:2, R:2 }); s = add(s, { type:'smell', date:'2026-02-01', L:2, R:1 });
+  /* 후각·청력은 예전 기록만 읽음 (새 기록은 거절) */
+  assert.equal(FU.addCheck(s, { type:'smell', date:'2026-01-01', L:2, R:2 }, TODAY).ok, false);
+  assert.match(FU.addCheck(s, { type:'hear', date:'2026-01-01', L:2, R:2 }, TODAY).error, /증상 기록/);
+  s = FU.clean({ ...J(s), checks:[...J(s).checks, { type:'smell', date:'2026-01-01', L:2, R:2 }, { type:'smell', date:'2026-02-01', L:2, R:1 },
+    { type:'hear', date:'2026-01-01', L:2, R:2 }, { type:'hear', date:'2026-02-01', L:2, R:2 }, { type:'hear', date:'2026-03-01', L:2, R:2 }] }, TODAY);
   assert.match(FU.compare(s, 'smell').reasons[0], /오른쪽 뚜렷하게 맡음 → 약하게 맡음/);
-  s = add(s, { type:'hear', date:'2026-01-01', L:2, R:2 }); s = add(s, { type:'hear', date:'2026-02-01', L:2, R:2 });
   assert.equal(FU.compare(s, 'hear').state, 'same');
   s = add(s, { type:'care', date:'2026-01-01', items:[] }); s = add(s, { type:'care', date:'2026-02-01', items:['seiz'] });
   assert.equal(FU.compare(s, 'care').state, 'changed');
@@ -190,27 +202,29 @@ test('엇갈림 안내: 체크의 기준점·최근 날짜가 최근 두 MRI 날
   const mri = (s, d, v) => ok(FU.addMri(s, d, v, TODAY));
   // ① 날짜가 모두 맞고 MRI는 늘지 않았는데 체크가 달라짐 → 엇갈림
   let s = mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 18);
-  s = add(s, tap('2025-01-01', 50, 52)); s = add(s, tap('2026-01-01', 30, 52));
+  s = add(s, vf('2025-01-01', 'R', 3, 3, 3, 3)); s = add(s, vf('2026-01-01', 'R', 3, 3, 0, 3));
   let c = FU.crossing(s); assert.equal(c.cross, true); assert.equal(c.kind, 'mri-flat');
   assert.match(c.text, /2025-01-01 18 mm → 2026-01-01 18 mm/); assert.doesNotMatch(c.text, /정상|이상|악화|호전|진단|추정/);
   // ② 날짜가 맞고 MRI가 늘었는데 체크는 비슷함 → 엇갈림
   let g = mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 21);
-  g = add(g, tap('2025-01-01', 50, 52)); g = add(g, tap('2026-01-01', 50, 52));
+  g = add(g, vf('2025-01-01', 'R', 3, 3, 3, 3)); g = add(g, vf('2026-01-01', 'R', 3, 3, 3, 3));
   assert.equal(FU.crossing(g).kind, 'mri-grew');
   // ③ 체크 날짜가 MRI 날짜와 다르면 같은 값이어도 엇갈림이라 하지 않고 '판단 불가'
   let d = mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 18);
-  d = add(d, tap('2025-01-05', 50, 52)); d = add(d, tap('2026-02-05', 30, 52));
+  d = add(d, vf('2025-01-05', 'R', 3, 3, 3, 3)); d = add(d, vf('2026-02-05', 'R', 3, 3, 0, 3));
   c = FU.crossing(d); assert.equal(c.cross, false); assert.equal(c.undetermined, true);
   assert.match(c.text, /판단할 수 없습니다/); assert.match(c.text, /2025-01-05 → 2026-02-05/);
   // 기준점만 같고 최근 날짜가 다른 경우도 판단 불가
   let h = mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 18);
-  h = add(h, tap('2025-01-01', 50, 52)); h = add(h, tap('2026-02-05', 30, 52));
+  h = add(h, vf('2025-01-01', 'R', 3, 3, 3, 3)); h = add(h, vf('2026-02-05', 'R', 3, 3, 0, 3));
   assert.equal(FU.crossing(h).undetermined, true);
   // MRI 가 1개거나, 비교 가능한 체크가 없으면 아무 안내도 없음
   same({ ...FU.crossing(mri(FU.empty(), '2026-01-01', 18)) }, { cross:false });
   same({ ...FU.crossing(mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 18)) }, { cross:false });
   const one = add(mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 18), tap('2026-01-01', 5, 5));
   assert.equal(FU.crossing(one).cross, false, '체크가 기준점 하나뿐이면 비교 불가');
+  const two = add(add(mri(mri(FU.empty(), '2025-01-01', 18), '2026-01-01', 21), tap('2025-01-01', 50, 52)), tap('2026-01-01', 50, 52));
+  assert.equal(FU.crossing(two).cross, false, '두드리기는 2회까지 기준점을 만드는 중이라 엇갈림 판단에 쓰지 않음');
   assert.equal(FU.graph(d).crossing.undetermined, true);
 });
 
@@ -322,8 +336,7 @@ test('기준점 ID 조회와 요약 질문(인쇄용 5개): 약·다음 MRI·엇
   for(const t of ['tap', 'vf4']){ /* 변화 항목을 여러 개 만든다 */ }
   m = add(m, tap('2026-01-01', 50, 52)); m = add(m, tap('2026-02-01', 20, 52));
   for(const e of ['R', 'L']){ m = add(m, vf('2026-01-01', e, 3, 3, 3, 3)); m = add(m, vf('2026-02-01', e, 0, 0, 0, 0)); }
-  m = add(m, { type:'smell', date:'2026-01-01', L:2, R:2 }); m = add(m, { type:'smell', date:'2026-02-01', L:0, R:0 });
-  m = add(m, { type:'hear', date:'2026-01-01', L:2, R:2 }); m = add(m, { type:'hear', date:'2026-02-01', L:0, R:0 });
+  m = add(m, tap('2026-03-01', 50, 52)); m = add(m, tap('2026-04-01', 20, 52));
   m = add(m, { type:'sym', date:'2026-01-01', items:[] }); m = add(m, { type:'sym', date:'2026-02-01', items:['vis1', 'dip'] });
   const sm = FU.summary(m, TODAY);
   assert.ok(sm.questions.length > 5);
@@ -333,4 +346,78 @@ test('기준점 ID 조회와 요약 질문(인쇄용 5개): 약·다음 MRI·엇
   let e = add(FU.empty(), { type:'sym', date:'2026-09-01', items:['em2'] }); e = add(e, { type:'sym', date:'2026-10-01', items:['vis1'] });
   const se = FU.summary(e, TODAY);
   assert.equal(se.emergencyItems.length, 0); same(se.emergencyDates, ['2026-09-01'], '최근 기록에 없어도 과거 응급 체크 날짜는 요약에 남는다');
+});
+
+/* ── 2차 수정: 방향·박자 두드리기·잘 쓰는 손·주의할 손 ───────────── */
+test('좋아지는 방향은 변화가 아니다: 두드리기 횟수 증가·간단 시야 보인 수 증가는 "비슷함"', () => {
+  let s = FU.empty();
+  s = add(s, tap('2026-01-01', 40, 42)); s = add(s, tap('2026-01-02', 40, 42));
+  s = add(s, tap('2026-02-01', 55, 58));                       // 연습으로 빨라짐
+  assert.equal(FU.compare(s, 'tap').state, 'same');
+  let v = add(FU.empty(), vf('2026-01-01', 'R', 1, 1, 1, 1)); v = add(v, vf('2026-02-01', 'R', 3, 3, 3, 3));
+  assert.equal(FU.compare(v, 'vf4', 'R').state, 'same');
+});
+test('두드리기: 70회 초과 기록은 거절하고, 예전 기록 중 70회 초과는 비교에서 뺀다. 3번 평균 기록(trials·input)을 저장한다', () => {
+  const e = FU.empty();
+  assert.match(FU.addCheck(e, tap('2026-01-01', 71, 50), TODAY).error, /70회/);
+  const rec = FU.tapRecord([48, 50, 52], [55, 54, 56]);
+  const s = add(e, { ...rec, date:'2026-01-01' });
+  same(s.checks[0].trials, { L:[48, 50, 52], R:[55, 54, 56] }); assert.equal(s.checks[0].L.n, 50); assert.equal(s.checks[0].R.n, 55); assert.equal(s.checks[0].input, 'space');
+  assert.equal(FU.addCheck(e, { ...rec, date:'2026-01-01', trials:{ L:[48, 80], R:[1] } }, TODAY).ok, false, 'trials 도 70 이하만');
+  const old = FU.clean({ v:1, checks:[tap('2026-01-01', 120, 120), tap('2026-01-02', 50, 52)] }, TODAY);
+  assert.equal(old.checks.length, 2, '예전 기록은 지우지 않고 읽음');
+  assert.equal(FU.compare(old, 'tap').n, 1, '70회 초과 기록은 기준점·비교에서 제외');
+});
+test('박자 두드리기 계산: 처음 5개 간격 버림, 0.15초 미만·중앙값 2배 초과는 실수, 실수 20% 초과나 15개 미만이면 다시', () => {
+  const seq = ivs => { const t = [0]; for(const d of ivs) t.push(t[t.length - 1] + d); return t; };
+  const steady = FU.rhythmMetrics(seq(Array(30).fill(500)));
+  assert.equal(steady.valid, true); assert.equal(steady.cv, 0); assert.equal(steady.meanMs, 500); assert.equal(steady.err, 0);
+  const wobbly = FU.rhythmMetrics(seq(Array.from({ length:30 }, (_, i) => i % 2 ? 430 : 570)));
+  assert.equal(wobbly.valid, true); assert.ok(wobbly.cv > 10 && wobbly.cv < 20, String(wobbly.cv));
+  const warm = FU.rhythmMetrics(seq([100, 2000, 900, 50, 1500, ...Array(20).fill(500)]));
+  assert.equal(warm.err, 0, '처음 5개(박자를 찾는 구간)는 세지 않음'); assert.equal(warm.cv, 0);
+  const errs = FU.rhythmMetrics(seq([...Array(5).fill(500), ...Array(16).fill(500), 100, 1200, 100, 1300, 90]));
+  assert.equal(errs.err, 5); assert.equal(errs.valid, false, '실수 5/21 > 20%');
+  const few = FU.rhythmMetrics(seq(Array(18).fill(500)));
+  assert.equal(few.valid, false, '버린 뒤 13개 < 15개');
+  same({ ...FU.rhythmMetrics([]) }, { n:0, err:0, meanMs:null, cv:null, valid:false });
+  assert.equal(FU.rhythmMetrics(seq(Array(80).fill(500))).n, 41, '20초 밖 입력은 버림');
+});
+test('박자 두드리기 기록: 실수가 많은 결과는 거절, 처음 2회 평균이 기준점, 기준값이 없으면 "기준 만드는 중"', () => {
+  const R = (date, cl, cr, ml = 500, mr = 500) => ({ type:'rhythm', date, L:{ n:41, err:0, meanMs:ml, cv:cl, valid:true }, R:{ n:41, err:0, meanMs:mr, cv:cr, valid:true } });
+  let s = ok(FU.setSide(FU.empty(), 'left'));
+  assert.equal(FU.addCheck(s, { ...R('2026-01-01', 4, 4), L:{ n:41, err:9, meanMs:500, cv:4, valid:false } }, TODAY).ok, false);
+  assert.equal(FU.addCheck(s, { ...R('2026-01-01', 4, 4), L:{ n:41, err:0, meanMs:'<b>', cv:4, valid:true } }, TODAY).ok, false);
+  s = add(s, R('2026-01-01', 4, 4)); s = add(s, R('2026-01-02', 5, 4));
+  let c = FU.compare(s, 'rhythm'); assert.equal(c.state, 'baseline'); assert.equal(c.base.L.cv, 4.5);
+  s = add(s, R('2026-02-01', 12, 4, 900));
+  c = FU.compare(s, 'rhythm');
+  assert.equal(c.state, 'building', '건강인 측정 전에는 판단하지 않음'); same([...c.reasons], []);
+  assert.match(c.notes[0], /왼손 속도가 기준점과 많이 다릅니다/, '속도 변화는 기록만');
+  assert.equal(c.watch, 'L', '소뇌: 종양 같은 쪽 손');
+  /* 측정 후 기준값을 넣으면: 흔들림이 커질 때만 변화, 주의할 손이 더 커지면 변화 */
+  const N = { rhythmCv:5, rhythmLR:4 };
+  c = FU.compare(s, 'rhythm', undefined, { norms:N });
+  assert.equal(c.state, 'changed'); assert.ok(c.reasons.some(r => /왼손 박자 흔들림 커짐 4\.5% → 12%/.test(r))); assert.ok(c.reasons.some(r => /주의할 손/.test(r)));
+  let t = add(add(FU.empty(), R('2026-01-01', 8, 8)), R('2026-01-02', 8, 8)); t = add(t, R('2026-02-01', 3, 3));
+  assert.equal(FU.compare(t, 'rhythm', undefined, { norms:N }).state, 'same', '흔들림이 줄면 변화 아님');
+  const g = FU.graph(s); const p = g.panels.find(x => x.id === 'rhythm');
+  assert.equal(p.unit, '%'); assert.equal(p.series[0].pts.length, 3);
+});
+test('잘 쓰는 손과 주의할 손: 빠르게 두드리기는 종양 반대쪽, 박자 두드리기는 같은 쪽, 가운데·모름이면 없음', () => {
+  assert.equal(FU.clean({ v:1 }).hand, 'unknown'); assert.equal(FU.clean({ v:1, hand:'<x>' }).hand, 'unknown');
+  assert.equal(ok(FU.setHand(FU.empty(), 'left')).hand, 'left'); assert.equal(FU.setHand(FU.empty(), 'both').ok, false);
+  const L = ok(FU.setSide(FU.empty(), 'left')), Rt = ok(FU.setSide(FU.empty(), 'right')), M = ok(FU.setSide(FU.empty(), 'mid'));
+  assert.equal(FU.watchHand(L, 'tap'), 'R'); assert.equal(FU.watchHand(Rt, 'tap'), 'L');
+  assert.equal(FU.watchHand(L, 'rhythm'), 'L'); assert.equal(FU.watchHand(Rt, 'rhythm'), 'R');
+  assert.equal(FU.watchHand(M, 'tap'), null); assert.equal(FU.watchHand(L, 'vf4'), null);
+  /* 종양 왼쪽(주의할 손 = 오른손): 왼손만 느려진 좌우 변화는 사유가 아니고, 오른손이 느려지면 사유 */
+  let s = add(add(L, tap('2026-01-01', 50, 54)), tap('2026-01-02', 50, 54));
+  let x = add(s, tap('2026-02-01', 38, 54));
+  assert.ok(!FU.compare(x, 'tap').reasons.some(r => /상대적으로/.test(r)), '주의할 손이 아닌 쪽의 좌우 변화');
+  assert.ok(FU.compare(FU.clean({ ...J(x), side:'mid' }), 'tap').reasons.some(r => /왼손이 오른손보다 상대적으로/.test(r)), '주의할 손이 없으면 양쪽 다 봄');
+  x = add(s, tap('2026-02-01', 50, 40));
+  assert.ok(FU.compare(x, 'tap').reasons.some(r => /오른손이 왼손보다 상대적으로 느려짐/.test(r)));
+  const m = FU.summary(ok(FU.setHand(x, 'left')), TODAY);
+  assert.equal(m.handKo, '왼손'); assert.equal(m.compare.find(c => c.key === 'tap').watchKo, '오른손');
 });

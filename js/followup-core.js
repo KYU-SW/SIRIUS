@@ -3,14 +3,21 @@
    F. 경과 관찰 — 핵심 규칙 (DOM·저장소·네트워크 없음)
    ───────────────────────────────────────────────────────────
    · 종양 위치(6개+모름)에 따라 체크 구성이 정해지고, 기록은 날짜별로 쌓입니다.
-   · 판정하지 않습니다. 첫 측정(기준점)과 비교해 "비슷함 / 변화 있음"만 말합니다.
-   · 아래 TOL 값은 화면 표시용 약속일 뿐 의학적 기준이 아닙니다. 임상 임계치나 기준 범위를 쓰지 않습니다.
+   · 판정하지 않습니다. 기준점과 비교해 "비슷함 / 변화 있음"만 말합니다.
+     두드리기·박자 두드리기의 기준점은 처음 2회 평균, 나머지는 첫 기록입니다.
+   · "변화 있음"은 나빠지는 방향만 셉니다(횟수 감소, 흔들림 증가, 보인 수 감소, 새 증상).
+   · 기준값(NORMS)은 출처를 함께 적습니다. 아직 건강인 측정으로 정하지 못한 값은 null 이며,
+     그때 화면에는 "기준 만드는 중"이라고만 보입니다.
    · 상태(state)는 JSON으로 직렬화 가능한 객체이며, 모든 입력은 화이트리스트로 검증합니다. 자유 입력 문자열은 없습니다.
    ═══════════════════════════════════════════════════════════ */
 const FU = (() => {
   const V = 1;
   const MAX_CHECKS = 300, MAX_MRI = 60;
   const TAP_MS = 10000;
+  const TAP_MAX = 70;                 // 10초 70회 초과 = 측정 오류 (표준 손가락 두드리기 검사의 건강인 최고 약 63회)
+  const TAP_TRIALS = 3, TAP_REST_MS = 5000;   // 손마다 10초 × 3번, 사이 5초 쉬기, 평균 저장
+  /* 박자 두드리기: 편한 속도로 20초. 처음 5개 간격은 버리고, 0.15초 미만(두 번 눌림)·중앙값 2배 초과(멈춤)는 실수 */
+  const RHY = Object.freeze({ ms:20000, practiceMs:10000, skip:5, minIv:150, maxFactor:2, errMax:0.2, minValid:15 });
 
   /* 종양 위치 6개 + 모름 (MSD Manual 위치별 증상 표 기준 — 기획서) */
   const LOCS = Object.freeze([
@@ -32,23 +39,37 @@ const FU = (() => {
   ]);
   const SIDE_IDS = new Set(SIDES.map(s => s.id));
 
-  const TYPES = Object.freeze(['tap', 'vf4', 'sym', 'smell', 'hear', 'care']);
+  /* 잘 쓰는 손 */
+  const HANDS = Object.freeze([
+    { id:'right',   ko:'오른손' },
+    { id:'left',    ko:'왼손' },
+    { id:'unknown', ko:'모름' },
+  ]);
+  const HAND_IDS = new Set(HANDS.map(h => h.id));
+
+  /* smell·hear 는 예전 기록을 읽기 위해서만 남깁니다(새 기록 화면 없음). 새 기록은 ACTIVE_TYPES 만. */
+  const TYPES = Object.freeze(['tap', 'rhythm', 'vf4', 'sym', 'care', 'smell', 'hear']);
+  const ACTIVE_TYPES = Object.freeze(['tap', 'rhythm', 'vf4', 'sym', 'care']);
   const TYPE_KO = Object.freeze({
-    tap:'손가락 두드리기', vf4:'간단 시야(한 눈씩)', sym:'증상 기록', smell:'후각 기록', hear:'청력 기록', care:'보호자 관찰 기록',
+    tap:'빠르게 두드리기', rhythm:'박자 두드리기', vf4:'간단 시야(한 눈씩)', sym:'증상 기록', care:'보호자 관찰 기록',
+    smell:'후각 기록(예전 기록)', hear:'청력 기록(예전 기록)',
   });
   const TYPE_SET = new Set(TYPES);
 
   /* 위치별 구성: core = 먼저 권하는 체크, sym = 증상 기록에 보이는 항목,
-     precise = 첫 권장이 '시야 기록' 화면의 정밀 시야검사(이때 vf4 는 빠른 확인용으로 남김) */
+     precise = 정밀 시야검사를 권함(true) 또는 선택으로 보임('optional'). 이때 vf4 는 빠른 확인용으로 남김.
+     watch: 주의할 손 — contra = 종양 반대쪽 손(대뇌 운동 영역), ipsi = 종양 같은 쪽 손(소뇌) */
   const SETUP = Object.freeze({
-    sellar:       { core:['vf4','sym'],        sym:['vis1','vis2','headache'], precise:true },
-    cavernous:    { core:['sym','vf4'],        sym:['dip','eyemv','facenum'] },
-    olfactory:    { core:['smell','care','sym'], sym:['smellchg','memory'] },
-    parasagittal: { core:['tap','sym','care'], sym:['weak','balance','headache'] },
-    convexity:    { core:['tap','sym','care'], sym:['seiz','memory','weak'] },
-    cpa:          { core:['hear','sym','care'], sym:['hearing','facenum','balance'] },
-    unknown:      { core:['vf4','tap','sym'],  sym:['vis1','vis2','dip','facenum','smellchg','hearing','weak','seiz','memory','balance','headache'] },
+    sellar:       { core:['vf4','sym'],          sym:['vis1','vis2','headache'], precise:true },
+    cavernous:    { core:['sym','vf4'],          sym:['dip','eyemv','facenum'], precise:'optional' },
+    olfactory:    { core:['sym','care'],         sym:['smellchg','memory'] },
+    parasagittal: { core:['tap','sym','care'],   sym:['weak','balance','headache'], watch:'contra' },
+    convexity:    { core:['tap','sym','care'],   sym:['seiz','memory','weak'], watch:'contra' },
+    cpa:          { core:['rhythm','sym','care'], sym:['hearing','facenum','balance'], watch:'ipsi' },
+    unknown:      { core:['vf4','tap','sym'],    sym:['vis1','vis2','dip','facenum','smellchg','hearing','weak','seiz','memory','balance','headache'], precise:true },
   });
+  /* 검사 종류별 주의할 손: 빠르게 두드리기 = 대뇌(반대쪽), 박자 두드리기 = 소뇌(같은 쪽) */
+  const WATCH_RULE = Object.freeze({ tap:'contra', rhythm:'ipsi' });
 
   /* 증상 기록 항목: em=true 는 응급 안내 대상, needsCare=true 는 보호자가 옆에 있을 때만 */
   const EMERGENCY = Object.freeze([
@@ -102,12 +123,18 @@ const FU = (() => {
 
   /* 화면 표시용 약속 (의학적 기준 아님) */
   const TOL = Object.freeze({
-    tapCount:0.2,     // 한 손 두드린 횟수가 첫 측정 대비 20% 이상 다름
-    tapLR:20,         // 좌우 차이(%)가 첫 측정과 20%p 이상 다름
-    tapCv:15,         // 리듬 흔들림(%)이 첫 측정과 15%p 이상 다름
-    vfDir:2,          // 한 방향에서 본 횟수(0~3)가 첫 측정과 2 이상 다름
-    vfTotal:3,        // 한 눈의 총합(0~12)이 첫 측정과 3 이상 다름
-    streak:2,         // 변화 있음이 이어진 기록 수
+    vfDir:2,          // 한 방향에서 본 횟수(0~3)가 첫 측정보다 2 이상 줄어듦
+    vfTotal:3,        // 한 눈의 총합(0~12)이 첫 측정보다 3 이상 줄어듦
+    streak:2,         // 변화 있음이 이어진 기록 수 (2번 연속 = 확인 필요)
+  });
+  /* 두드리기 기준값. null = 아직 건강인 반복 측정으로 정하지 못함 → "기준 만드는 중".
+     건강인 측정(1회차·2회차 차이 → MDC95 = SEM × 1.96 × √2)이 끝나면 여기 숫자와 출처만 바꿉니다. */
+  const NORMS = Object.freeze({
+    tapDrop:0.2,      // 한 손 횟수가 기준점보다 20% 이상 줄어듦 — 임시값(건강인 측정 MDC 로 교체 예정)
+    tapLR:20,         // 좌우 비(%)가 주의할 손 쪽으로 20%p 이상 나빠짐 — 임시값(측정 후 교체)
+    rhythmCv:null,    // 박자 흔들림(cv, %p) 증가 — 건강인 측정으로 정함
+    rhythmLR:null,    // 주의할 손의 흔들림 증가가 반대 손보다 이만큼(%p) 더 큼 — 건강인 측정으로 정함
+    rhythmSpeed:0.5,  // 평균 간격이 기준점과 50% 넘게 다르면 "속도가 많이 다릅니다"로 기록만(판단에 쓰지 않음)
   });
 
   /* ── 날짜 ── */
@@ -142,7 +169,31 @@ const FU = (() => {
       return { n, cv: cv === undefined ? null : cv };
     };
     const L = h(raw.L), R = h(raw.R);
-    return L && R ? { L, R } : null;
+    if(!L || !R) return null;
+    const out = { L, R };
+    if(raw.input === 'space') out.input = 'space';            // 새 기록: 스페이스바로만 잰 값
+    const tr = raw.trials;                                     // 새 기록: 손마다 10초 × 최대 3번의 횟수
+    if(tr !== undefined && tr !== null){
+      const ok = a => Array.isArray(a) && a.length >= 1 && a.length <= TAP_TRIALS && a.every(n => isInt(n, 0, TAP_MAX));
+      if(!tr || typeof tr !== 'object' || !ok(tr.L) || !ok(tr.R)) return null;
+      out.trials = { L:tr.L.slice(), R:tr.R.slice() };
+    }
+    return out;
+  }
+  /* 박자 두드리기 한 손: n 누른 수, err 실수 간격 수, meanMs 평균 간격, cv 흔들림(%, 소수 1자리), valid */
+  function normRhythm(raw){
+    const h = x => {
+      if(!x || typeof x !== 'object') return null;
+      if(!isInt(x.n, 0, 1000) || !isInt(x.err, 0, 1000) || typeof x.valid !== 'boolean') return null;
+      const meanMs = x.meanMs === null || x.meanMs === undefined ? null : x.meanMs;
+      const cv = x.cv === null || x.cv === undefined ? null : x.cv;
+      if(meanMs !== null && !isInt(meanMs, RHY.minIv, 5000)) return null;
+      if(cv !== null && !(typeof cv === 'number' && Number.isFinite(cv) && cv >= 0 && cv <= 200)) return null;
+      if(x.valid && (meanMs === null || cv === null)) return null;
+      return { n:x.n, err:x.err, meanMs, cv: cv === null ? null : Math.round(cv * 10) / 10, valid:x.valid };
+    };
+    const L = h(raw.L), R = h(raw.R);
+    return L && R ? { L, R, input:'space' } : null;
   }
   function normVf4(raw){
     if(raw.eye !== 'R' && raw.eye !== 'L') return null;
@@ -172,6 +223,7 @@ const FU = (() => {
     const base = { type:raw.type, date:raw.date };
     let p = null;
     if(raw.type === 'tap') p = normTap(raw);
+    else if(raw.type === 'rhythm') p = normRhythm(raw);
     else if(raw.type === 'vf4') p = normVf4(raw);
     else if(raw.type === 'sym'){ const it = normIds(raw.items, SYM_BY_ID); p = it ? { items:it } : null; }
     else if(raw.type === 'care'){ const it = normIds(raw.items, CARE_BY_ID); p = it ? { items:it } : null; }
@@ -179,7 +231,7 @@ const FU = (() => {
     return p ? Object.assign(base, p) : null;
   }
 
-  const empty = () => ({ v:V, loc:'unknown', side:'unknown', next:null, mri:[], checks:[], meds:{ hormone:'unknown', date:null }, nid:1 });
+  const empty = () => ({ v:V, loc:'unknown', side:'unknown', hand:'unknown', next:null, mri:[], checks:[], meds:{ hormone:'unknown', date:null }, nid:1 });
 
   function byDate(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id; }
 
@@ -191,6 +243,7 @@ const FU = (() => {
     if(raw.v !== V) return out;
     if(typeof raw.loc === 'string' && LOC_IDS.has(raw.loc)) out.loc = raw.loc;
     if(typeof raw.side === 'string' && SIDE_IDS.has(raw.side)) out.side = raw.side;   // 없으면(예전 기록) unknown
+    if(typeof raw.hand === 'string' && HAND_IDS.has(raw.hand)) out.hand = raw.hand;   // 없으면(예전 기록) unknown
     if(isDate(raw.next)) out.next = raw.next;
     if(Array.isArray(raw.mri)){
       const seen = new Set();
@@ -238,6 +291,11 @@ const FU = (() => {
     const s = clean(state); s.side = side;
     return { ok:true, state:s };
   }
+  function setHand(state, hand){
+    if(typeof hand !== 'string' || !HAND_IDS.has(hand)) return fail('잘 쓰는 손을 목록에서 골라 주세요.');
+    const s = clean(state); s.hand = hand;
+    return { ok:true, state:s };
+  }
   function setNext(state, date){
     const s = clean(state);
     if(date === null || date === '') { s.next = null; return { ok:true, state:s }; }
@@ -267,8 +325,11 @@ const FU = (() => {
   }
   function addCheck(state, rec, today){
     const s = clean(state, today);
+    if(rec && (rec.type === 'smell' || rec.type === 'hear')) return fail('후각·청력 검사는 더 이상 새로 기록하지 않습니다. 증상 기록에서 체크해 주세요.');
     const n = normCheck(rec, today);
     if(!n) return fail('기록 내용이 올바르지 않습니다. 날짜와 값을 다시 확인해 주세요.');
+    if(n.type === 'tap' && !tapValid(n)) return fail(`10초에 ${TAP_MAX}회를 넘으면 측정 오류로 봅니다. 검지 하나로 스페이스바를 눌러 다시 해 주세요.`);
+    if(n.type === 'rhythm' && !rhythmValid(n)) return fail('박자 두드리기 결과에 실수가 많아 기록하지 않았습니다. 다시 해 주세요.');
     if(s.checks.length >= MAX_CHECKS) return fail(`체크 기록은 ${MAX_CHECKS}개까지 둘 수 있습니다. 오래된 기록을 지운 뒤 다시 시도해 주세요.`);
     n.id = s.nid; s.nid++;
     s.checks.push(n); s.checks.sort(byDate);
@@ -290,7 +351,8 @@ const FU = (() => {
   }
 
   /* ── 두드리기 / 간단 시야 측정값 계산 ── */
-  /** times: 시작 후 ms. 10초를 넘는 값·잘못된 값은 버리고, 30 ms 안의 중복 입력은 한 번으로 셉니다. */
+  /** 빠르게 두드리기 한 번(10초). times: 시작 후 ms. 10초를 넘는 값·잘못된 값은 버리고, 30 ms 안의 중복 입력은 한 번으로 셉니다.
+   *  over = 70회 초과(측정 오류) → 화면에서 그 회차를 다시 하게 합니다. */
   function tapMetrics(times){
     const t = (Array.isArray(times) ? times : []).filter(x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= TAP_MS).sort((a, b) => a - b);
     const keep = [];
@@ -303,9 +365,47 @@ const FU = (() => {
       const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) * (b - mean), 0) / iv.length);
       if(mean > 0) cv = Math.min(500, Math.round(sd / mean * 100));
     }
-    return { n, cv };
+    return { n, cv, over: n > TAP_MAX };
   }
-  const tapLR = rec => { const mx = Math.max(rec.L.n, rec.R.n); return mx ? Math.round(Math.abs(rec.L.n - rec.R.n) / mx * 100) : null; };
+  /** 손마다 여러 번(최대 3번) 잰 횟수 → 저장할 기록. 평균은 반올림한 정수 */
+  function tapRecord(trialsL, trialsR){
+    const avg = a => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
+    return { type:'tap', L:{ n:avg(trialsL), cv:null }, R:{ n:avg(trialsR), cv:null }, trials:{ L:trialsL.slice(), R:trialsR.slice() }, input:'space' };
+  }
+  const tapValid = rec => rec.L.n <= TAP_MAX && rec.R.n <= TAP_MAX;     // 예전 기록 중 70회 초과는 비교에서 뺌
+  /** 좌우 차이(%) = (잘 쓰는 손 − 반대 손) ÷ 잘 쓰는 손 × 100. 잘 쓰는 손을 모르면 오른손으로 봅니다(대부분 오른손잡이).
+   *  보통 잘 쓰는 손이 약 8% 빠릅니다(표준 두드리기 규준: 잘 쓰는 손 49.5회, 반대 손 45.7회). */
+  const tapLR = (rec, hand) => {
+    const d = hand === 'left' ? 'L' : 'R', o = d === 'L' ? 'R' : 'L';
+    return rec[d].n ? Math.round((rec[d].n - rec[o].n) / rec[d].n * 100) : null;
+  };
+  /* 비교용 좌우 비: (오른손 − 왼손) ÷ 큰 쪽 × 100. 값이 줄면 오른손이 상대적으로 나빠진 것 */
+  const lrRL = rec => { const mx = Math.max(rec.L.n, rec.R.n); return mx ? (rec.R.n - rec.L.n) / mx * 100 : null; };
+
+  /** 박자 두드리기 한 손(20초). times: 시작 후 ms(스페이스바, 키 반복 제외).
+   *  처음 5개 간격은 버림 → 0.15초 미만(두 번 눌림)·중앙값 2배 초과(멈춤)는 실수 →
+   *  실수 20% 초과 또는 남은 간격 15개 미만이면 valid:false.
+   *  meanMs = 남은 간격 평균, cv = 간격 표준편차 ÷ 평균 × 100 (소수 1자리, 핵심 값) */
+  function rhythmMetrics(times, durMs = RHY.ms){
+    const t = (Array.isArray(times) ? times : []).filter(x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= durMs).sort((a, b) => a - b);
+    const all = []; for(let i = 1; i < t.length; i++) all.push(t[i] - t[i - 1]);
+    const iv = all.slice(RHY.skip);
+    const out = { n:Math.min(1000, t.length), err:0, meanMs:null, cv:null, valid:false };
+    if(!iv.length) return out;
+    const sorted = iv.slice().sort((a, b) => a - b), mid = sorted.length >> 1;
+    const med = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    const good = iv.filter(x => x >= RHY.minIv && x <= RHY.maxFactor * med);
+    out.err = Math.min(1000, iv.length - good.length);
+    if(good.length >= 2){
+      const mean = good.reduce((a, b) => a + b, 0) / good.length;
+      const sd = Math.sqrt(good.reduce((a, b) => a + (b - mean) ** 2, 0) / (good.length - 1));
+      out.meanMs = Math.min(5000, Math.max(RHY.minIv, Math.round(mean)));
+      out.cv = Math.min(200, Math.round(sd / mean * 1000) / 10);
+    }
+    out.valid = good.length >= RHY.minValid && out.err / iv.length <= RHY.errMax && out.cv !== null;
+    return out;
+  }
+  const rhythmValid = rec => !!(rec.L.valid && rec.R.valid);
 
   const DIRS = Object.freeze(['u', 'd', 'l', 'r']);
   const DIR_KO = Object.freeze({ u:'위', d:'아래', l:'왼쪽', r:'오른쪽' });
@@ -332,48 +432,107 @@ const FU = (() => {
 
   /* ── 기준점 비교 ── */
   const checksOf = (s, type, eye) => s.checks.filter(c => c.type === type && (!eye || c.eye === eye));
-  function diffRecord(type, base, cur){
-    const why = [];
+  const HAND_KO = Object.freeze({ L:'왼손', R:'오른손' });
+  /** 주의할 손 ('L'|'R'|null). 종양이 왼쪽/오른쪽으로 치우쳤을 때만 정합니다.
+   *  빠르게 두드리기 = 종양 반대쪽 손, 박자 두드리기 = 종양 같은 쪽 손 */
+  function watchHand(state, type){
+    const s = clean(state), rule = WATCH_RULE[type];
+    if(!rule || (s.side !== 'left' && s.side !== 'right')) return null;
+    const same = s.side === 'left' ? 'L' : 'R';
+    return rule === 'ipsi' ? same : (same === 'L' ? 'R' : 'L');
+  }
+  const TWO_BASE = new Set(['tap', 'rhythm']);              // 처음 2회 평균을 기준점으로 쓰는 검사
+  const r1 = v => Math.round(v * 10) / 10;
+  /* 두 기록의 평균 기준점. 화면·요약용으로 date(첫 날짜)·dates·ids 를 같이 둡니다. */
+  function avgBase(type, a, b){
+    const m = (x, y) => r1((x + y) / 2);
+    const base = { type, date:a.date, dates:[a.date, b.date], id:a.id, ids:[a.id, b.id], avg:true };
+    if(type === 'tap'){ for(const k of ['L', 'R']) base[k] = { n:m(a[k].n, b[k].n), cv:null }; }
+    else { for(const k of ['L', 'R']) base[k] = { cv:m(a[k].cv, b[k].cv), meanMs:Math.round((a[k].meanMs + b[k].meanMs) / 2), valid:true }; }
+    return base;
+  }
+  /** 기준점과 한 기록 비교. 나빠지는 방향만 "변화"로 셉니다. 돌려주는 값: { why:[변화 사유], notes:[기록만 하는 참고] } */
+  function diffRecord(type, base, cur, ctx = {}){
+    const why = [], notes = [];
+    const N = ctx.norms || NORMS, w = ctx.watch || null;
     if(type === 'tap'){
-      for(const [k, nm] of [['L', '왼손'], ['R', '오른손']]){
-        if(base[k].n > 0 ? Math.abs(cur[k].n - base[k].n) / base[k].n >= TOL.tapCount : cur[k].n > 0)
-          why.push(`${nm} 두드린 횟수 ${base[k].n}회 → ${cur[k].n}회`);
+      for(const k of ['L', 'R']){
+        if(base[k].n > 0 && (cur[k].n - base[k].n) / base[k].n <= -N.tapDrop)
+          why.push(`${HAND_KO[k]} 두드린 횟수 줄어듦 ${base[k].n}회 → ${cur[k].n}회`);
       }
-      const a = tapLR(base), b = tapLR(cur);
-      if(a !== null && b !== null && Math.abs(a - b) >= TOL.tapLR) why.push(`좌우 차이 ${a}% → ${b}%`);
-      for(const [k, nm] of [['L', '왼손'], ['R', '오른손']]){
-        if(base[k].cv !== null && cur[k].cv !== null && Math.abs(base[k].cv - cur[k].cv) >= TOL.tapCv) why.push(`${nm} 리듬 흔들림 ${base[k].cv}% → ${cur[k].cv}%`);
+      const a = lrRL(base), b = lrRL(cur);
+      if(a !== null && b !== null){
+        const worseR = a - b, worseL = b - a;          // 오른손이 상대적으로 느려진 정도 / 왼손이 느려진 정도
+        if((w === 'R' || !w) && worseR >= N.tapLR) why.push(`오른손이 왼손보다 상대적으로 느려짐 (좌우 비 ${Math.round(a)}% → ${Math.round(b)}%)`);
+        if((w === 'L' || !w) && worseL >= N.tapLR) why.push(`왼손이 오른손보다 상대적으로 느려짐 (좌우 비 ${Math.round(a)}% → ${Math.round(b)}%)`);
+      }
+    } else if(type === 'rhythm'){
+      if(N.rhythmCv !== null){
+        for(const k of ['L', 'R']) if(cur[k].cv - base[k].cv >= N.rhythmCv) why.push(`${HAND_KO[k]} 박자 흔들림 커짐 ${base[k].cv}% → ${cur[k].cv}%`);
+      }
+      if(N.rhythmLR !== null && w){
+        const o = w === 'L' ? 'R' : 'L';
+        if((cur[w].cv - base[w].cv) - (cur[o].cv - base[o].cv) >= N.rhythmLR) why.push(`${HAND_KO[w]}(주의할 손)의 흔들림이 반대 손보다 더 커짐`);
+      }
+      for(const k of ['L', 'R']){
+        if(base[k].meanMs && Math.abs(cur[k].meanMs - base[k].meanMs) / base[k].meanMs > N.rhythmSpeed)
+          notes.push(`${HAND_KO[k]} 속도가 기준점과 많이 다릅니다 (평균 간격 ${base[k].meanMs}ms → ${cur[k].meanMs}ms)`);
       }
     } else if(type === 'vf4'){
-      for(const d of DIRS) if(Math.abs(cur.seen[d] - base.seen[d]) >= TOL.vfDir) why.push(`${DIR_KO[d]} 방향 ${base.seen[d]}/3 → ${cur.seen[d]}/3`);
+      for(const d of DIRS) if(base.seen[d] - cur.seen[d] >= TOL.vfDir) why.push(`${DIR_KO[d]} 방향 ${base.seen[d]}/3 → ${cur.seen[d]}/3`);
       const a = vfTotal(base), b = vfTotal(cur);
-      if(!why.length && Math.abs(a - b) >= TOL.vfTotal) why.push(`전체 ${a}/12 → ${b}/12`);
+      if(!why.length && a - b >= TOL.vfTotal) why.push(`전체 ${a}/12 → ${b}/12`);
     } else if(type === 'sym' || type === 'care'){
       const names = type === 'sym' ? SYM_BY_ID : CARE_BY_ID;
       for(const id of cur.items) if(!base.items.includes(id)) why.push(`새로 체크함: ${names[id].ko}`);
-    } else {                                   // smell, hear
-      for(const k of ['L', 'R']) if(cur[k] !== base[k]) why.push(`${k === 'L' ? '왼쪽' : '오른쪽'} ${LEVEL3[type][base[k]]} → ${LEVEL3[type][cur[k]]}`);
+    } else {                                   // smell, hear (예전 기록): 낮아진 쪽만
+      for(const k of ['L', 'R']) if(cur[k] < base[k]) why.push(`${k === 'L' ? '왼쪽' : '오른쪽'} ${LEVEL3[type][base[k]]} → ${LEVEL3[type][cur[k]]}`);
     }
-    return why;
+    return { why, notes };
   }
-  /** type(·눈)별 기준점 비교. state: none | baseline | same | changed */
-  function compare(state, type, eye){
-    const s = clean(state);
+  /* 비교에 쓰는 기록: 신뢰도 낮은 간단 시야, 70회 초과 두드리기, 실수가 많은 박자 기록은 뺍니다 */
+  function usable(s, type, eye){
     let list = checksOf(s, type, eye);
     if(type === 'vf4') list = list.filter(vfReliable);
+    else if(type === 'tap') list = list.filter(tapValid);
+    else if(type === 'rhythm') list = list.filter(rhythmValid);
+    return list;
+  }
+  /** type(·눈)별 기준점 비교.
+   *  state: none | baseline(기준점 만드는 중, need = 남은 횟수) | building(기준값을 아직 정하지 못함) | same | changed
+   *  opts.norms 로 기준값을 바꿔 볼 수 있습니다(테스트·측정 후 확인용). */
+  function compare(state, type, eye, opts = {}){
+    const s = clean(state);
+    const list = usable(s, type, eye);
+    const N = Object.assign({}, NORMS, opts.norms || {});
+    const watch = watchHand(s, type);
     if(!list.length) return { state:'none', n:0 };
+    if(TWO_BASE.has(type)){
+      if(list.length === 1) return { state:'baseline', n:1, need:1, base:list[0], latest:list[0], reasons:[], notes:[], streak:0, watch };
+      const base = avgBase(type, list[0], list[1]);
+      if(list.length === 2) return { state:'baseline', n:2, need:0, base, latest:list[1], reasons:[], notes:[], streak:0, watch };
+      const latest = list[list.length - 1];
+      const d = diffRecord(type, base, latest, { norms:N, watch });
+      let streak = 0;
+      for(let i = list.length - 1; i >= 2; i--){ if(diffRecord(type, base, list[i], { norms:N, watch }).why.length) streak++; else break; }
+      const building = type === 'rhythm' && (N.rhythmCv === null && (N.rhythmLR === null || !watch));
+      const st = d.why.length ? 'changed' : building ? 'building' : 'same';
+      return { state:st, n:list.length, need:0, base, latest, reasons:d.why, notes:d.notes, streak, repeated: streak >= TOL.streak, watch, building };
+    }
     const base = list[0];
-    if(list.length === 1) return { state:'baseline', n:1, base, latest:base, reasons:[], streak:0 };
+    if(list.length === 1) return { state:'baseline', n:1, need:0, base, latest:base, reasons:[], notes:[], streak:0 };
     const latest = list[list.length - 1];
-    const reasons = diffRecord(type, base, latest);
+    const reasons = diffRecord(type, base, latest).why;
     const limited = type === 'vf4' && !!base.fw && !!latest.fw && base.fw !== latest.fw;
     const limitNote = limited ? `기준점과 검사 화면 크기가 달라(${base.fw}px → ${latest.fw}px) 비교에 한계가 있습니다. 같은 기기·창 크기·확대 비율로 다시 검사해 보세요.` : '';
     let streak = 0;
-    for(let i = list.length - 1; i >= 1; i--){ if(diffRecord(type, base, list[i]).length) streak++; else break; }
-    return { state: reasons.length ? 'changed' : 'same', n:list.length, base, latest, reasons, streak, repeated: streak >= TOL.streak, limited, limitNote };
+    for(let i = list.length - 1; i >= 1; i--){ if(diffRecord(type, base, list[i]).why.length) streak++; else break; }
+    return { state: reasons.length ? 'changed' : 'same', n:list.length, need:0, base, latest, reasons, notes:[], streak, repeated: streak >= TOL.streak, limited, limitNote };
   }
-  /** 같은 종류(·눈)의 기준점 기록 id. 기록이 없으면 null. 삭제·소급 입력으로 기준점이 바뀌었는지 알리는 데 씁니다. */
+  /** 같은 종류(·눈)의 기준점 기록 id(평균 기준점이면 첫 기록). 기록이 없으면 null. 삭제·소급 입력으로 기준점이 바뀌었는지 알리는 데 씁니다. */
   const baseId = (state, type, eye) => { const c = compare(state, type, eye); return c.base ? c.base.id : null; };
+  /** 기준점에 쓰인 기록 id 목록 (평균 기준점이면 2개) */
+  const baseIds = (state, type, eye) => { const c = compare(state, type, eye); return !c.base ? [] : c.base.ids ? c.base.ids.slice() : [c.base.id]; };
   function allCompare(state){
     const out = [];
     for(const t of TYPES){
@@ -390,7 +549,7 @@ const FU = (() => {
     const s = clean(state, today);
     if(s.mri.length < 2) return { cross:false };
     const a = s.mri[s.mri.length - 2], b = s.mri[s.mri.length - 1];
-    const cmp = allCompare(s).filter(c => c.n >= 2);
+    const cmp = allCompare(s).filter(c => c.state === 'same' || c.state === 'changed');   // 기준점을 만드는 중이거나 기준값이 없는 검사는 빼고
     if(!cmp.length) return { cross:false };
     const aligned = cmp.filter(c => c.base.date === a.date && c.latest.date === b.date && !c.limited);
     const mriTxt = `MRI 기록 ${a.date} ${a.size} mm → ${b.date} ${b.size} mm`;
@@ -415,11 +574,11 @@ const FU = (() => {
     const key = LOC_IDS.has(loc) ? loc : 'unknown';
     const cfg = SETUP[key];
     const core = cfg.core.slice();
-    const extra = TYPES.filter(t => !core.includes(t));
+    const extra = ACTIVE_TYPES.filter(t => !core.includes(t));   // 후각·청력 검사는 새로 권하지 않음
     const sym = [...EMERGENCY, ...cfg.sym.map(id => SYM_BY_ID[id])];
     const focus = CARE_FOCUS[key] || [];
     const care = [...focus.map(id => CARE_BY_ID[id]), ...CARE_ITEMS.filter(i => !focus.includes(i.id))];
-    return { loc:key, core, extra, sym, care, careFocus:focus.slice(), precise:!!cfg.precise };
+    return { loc:key, core, extra, sym, care, careFocus:focus.slice(), precise:!!cfg.precise, preciseOptional:cfg.precise === 'optional', watch:cfg.watch || null };
   }
   const symEmergency = rec => rec.items.filter(id => EM_IDS.has(id));
 
@@ -434,21 +593,21 @@ const FU = (() => {
   }
   /* 시야 기록(VF.digest) 결과를 숫자·날짜·고정 코드로만 다시 만듭니다. 화면에 들어가는 글자는 이 파일의 고정 문구뿐입니다. */
   const VF_MAP_IDS = new Set(['base-v1', 'sellar-mid-v1', 'sellar-left-v1', 'sellar-right-v1', 'legacy-30']);
-  const VF_REASON_KO = Object.freeze({ cluster:'붙어 있는 나빠진 점', central:'중심 평균 하락', temporal:'귀쪽−코쪽 차이 증가', focus:'집중 구역 점 하락(임시 기준)' });
+  const VF_REASON_KO = Object.freeze({ cluster:'붙어 있는 나빠진 점', central:'중심 평균 하락', temporal:'귀쪽−코쪽 차이 증가', focus:'집중 구역 점 하락' });
   const num = v => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 100 ? Math.round(v * 10) / 10 : null;
   function cleanVf(list){
     const out = [];
     for(const e of Array.isArray(list) ? list.slice(0, 2) : []){
       if(!e || (e.eye !== 'R' && e.eye !== 'L') || !VF_MAP_IDS.has(e.mapId) || out.some(x => x.eye === e.eye)) continue;
       const pts = (Array.isArray(e.pts) ? e.pts : []).filter(p => p && isDate(p.date) && num(p.v) !== null).slice(-400).map(p => ({ date:p.date, v:num(p.v), unreliable:!!p.unreliable }));
-      const b = e.baseline && typeof e.baseline === 'object' ? { ms:num(e.baseline.ms), tn:num(e.baseline.tn), focus:num(e.baseline.focus) } : null;
+      const b = e.baseline && typeof e.baseline === 'object' ? { ms:num(e.baseline.ms), tn:num(e.baseline.tn), focus:num(e.baseline.focus), focusThr:num(e.baseline.focusThr) } : null;
       const L = e.latest && typeof e.latest === 'object' && isDate(e.latest.date) ? {
         date:e.latest.date, ms:num(e.latest.ms), dMs:num(e.latest.dMs), dTN:num(e.latest.dTN), dFocus:num(e.latest.dFocus),
         nFocusWorse:isInt(e.latest.nFocusWorse, 0, 3) ? e.latest.nFocusWorse : 0, worse:!!e.latest.worse,
         reasons:(Array.isArray(e.latest.reasons) ? e.latest.reasons : []).filter(r => own(VF_REASON_KO, r)) } : null;
       const st = ['none', 'baseline', 'tracking', 'stable', 'recheck', 'confirmed'].includes(e.state) ? e.state : 'none';
       out.push({ eye:e.eye, mapId:e.mapId, zoneKo:e.zone === 'central' ? '중심' : e.zone === 'temporal-upper' ? '귀쪽 위' : '', state:st,
-        nReliable:isInt(e.nReliable, 0, 400) ? e.nReliable : 0, otherMap:isInt(e.otherMap, 0, 400) ? e.otherMap : 0, baseline:b, latest:L, pts });
+        nReliable:isInt(e.nReliable, 0, 400) ? e.nReliable : 0, otherMap:isInt(e.otherMap, 0, 400) ? e.otherMap : 0, unstable:!!e.unstable, baseline:b, latest:L, pts });
     }
     return out;
   }
@@ -469,10 +628,16 @@ const FU = (() => {
     if(vf.length) panels.push({ id:'vf4', title:'간단 시야: 보인 자극 수', unit:'/12', series:vf, fixed:[0, 12], fixedTicks:[0, 3, 6, 9, 12] });
     const tp = [];
     for(const h of ['L', 'R']){
-      const p = checksOf(s, 'tap').map(c => ({ date:c.date, v:c[h].n }));
+      const p = checksOf(s, 'tap').map(c => ({ date:c.date, v:c[h].n, unreliable:!tapValid(c) }));
       if(p.length) tp.push({ id:'tap-' + h, label:h === 'L' ? '왼손' : '오른손', pts:p });
     }
-    if(tp.length) panels.push({ id:'tap', title:'손가락 두드리기: 10초 횟수', unit:'회', series:tp });
+    if(tp.length) panels.push({ id:'tap', title:'빠르게 두드리기: 10초 횟수', unit:'회', series:tp });
+    const rh = [];
+    for(const h of ['L', 'R']){
+      const p = checksOf(s, 'rhythm').filter(rhythmValid).map(c => ({ date:c.date, v:c[h].cv }));
+      if(p.length) rh.push({ id:'rhy-' + h, label:h === 'L' ? '왼손' : '오른손', pts:p });
+    }
+    if(rh.length) panels.push({ id:'rhythm', title:'박자 두드리기: 흔들림 (낮을수록 일정)', unit:'%', series:rh });
     for(const p of panels){
       const vals = p.series.flatMap(x => x.pts.map(q => q.v));
       const [lo, hi] = p.fixed || [Math.min(...vals), Math.max(...vals)];
@@ -517,13 +682,13 @@ const FU = (() => {
   function vfLines(vf){
     return vf.map(e => {
       const eye = `${e.eye === 'R' ? '오른쪽' : '왼쪽'} 눈 [지도 ${e.mapId}]`;
-      const other = e.otherMap ? ` · 다른 지도 기록 ${e.otherMap}회는 비교에서 뺌` : '';
+      const other = (e.otherMap ? ` · 다른 지도·기기 기록 ${e.otherMap}회는 비교에서 뺌` : '') + (e.unstable ? ' · 기준선 검사가 불안정함(기준선을 다시 만들기를 권함)' : '');
       if(e.state === 'none' || e.state === 'baseline') return `${eye}: 기준선 측정 중 (${e.nReliable}/2)${other}`;
       const b = e.baseline || {}, L = e.latest;
       const head = `${eye}: 기준선 평균 ${b.ms ?? '–'}점, 귀쪽−코쪽 ${sgn(b.tn)}${b.focus != null ? `, 집중 구역(${e.zoneKo}) ${b.focus}점` : ''}`;
       if(!L) return `${head} · 기준선 이후 검사 없음${other}`;
       const why = L.reasons.length ? ` · 변화 사유: ${L.reasons.map(r => VF_REASON_KO[r]).join(', ')}` : ' · 기준선과 비슷함';
-      return `${head} → 최근 ${L.date} 평균 ${sgn(L.dMs)}, 귀쪽−코쪽 변화 ${sgn(L.dTN)}${L.dFocus != null ? `, 집중 구역 변화 ${sgn(L.dFocus)} (6점 이상 낮은 집중 점 ${L.nFocusWorse}/3)` : ''}${why}${other}`;
+      return `${head} → 최근 ${L.date} 평균 ${sgn(L.dMs)}, 귀쪽−코쪽 변화 ${sgn(L.dTN)}${L.dFocus != null ? `, 집중 구역 변화 ${sgn(L.dFocus)} (${b.focusThr ?? 6}점 이상 낮은 집중 점 ${L.nFocusWorse}/3)` : ''}${why}${other}`;
     });
   }
   function summary(state, today, extra){
@@ -532,24 +697,27 @@ const FU = (() => {
     const vf = cleanVf(extra && extra.vf);
     const cmp = allCompare(s).map(c => ({
       key:c.type + (c.eye || ''), name:label(c), state:c.state, n:c.n,
-      base:c.base ? c.base.date : null, latest:c.latest ? c.latest.date : null,
-      reasons:c.reasons || [], repeated:!!c.repeated, limited:!!c.limited, limitNote:c.limitNote || '',
+      base:c.base ? (c.base.dates ? c.base.dates.join('·') + ' 평균' : c.base.date) : null, latest:c.latest ? c.latest.date : null, need:c.need || 0,
+      reasons:c.reasons || [], notes:c.notes || [], repeated:!!c.repeated, limited:!!c.limited, limitNote:c.limitNote || '',
+      watchKo:c.watch ? HAND_KO[c.watch] : '',
     }));
     const lastSym = checksOf(s, 'sym').slice(-1)[0];
     const em = lastSym ? symEmergency(lastSym) : [];
     const emergencyDates = checksOf(s, 'sym').filter(c => symEmergency(c).length).map(c => c.date).filter(d => d !== (em.length ? lastSym.date : '')).slice(-3);
     const daysToNext = s.next && today && isDate(today) ? dayNum(s.next) - dayNum(today) : null;
     return {
-      locKo:loc.ko, side:s.side, sideKo:SIDES.find(x => x.id === s.side).ko, vf, vfLines:vfLines(vf), next:s.next, daysToNext, mri:s.mri.slice(), mriRecent:s.mri.slice(-3), hormone:s.meds.hormone, hormoneKo:HORMONE[s.meds.hormone], hormoneDate:s.meds.date,
+      locKo:loc.ko, side:s.side, sideKo:SIDES.find(x => x.id === s.side).ko, hand:s.hand, handKo:HANDS.find(x => x.id === s.hand).ko, vf, vfLines:vfLines(vf), next:s.next, daysToNext, mri:s.mri.slice(), mriRecent:s.mri.slice(-3), hormone:s.meds.hormone, hormoneKo:HORMONE[s.meds.hormone], hormoneDate:s.meds.date,
       compare:cmp, crossing:crossing(s), emergencyItems:em.map(id => SYM_BY_ID[id].ko), emergencyDate:em.length ? lastSym.date : null,
       emergencyDates, questions:questions(s), printQuestions:printQuestions(s), nChecks:s.checks.length,
     };
   }
 
   return Object.freeze({
-    V, MAX_CHECKS, MAX_MRI, TAP_MS, TOL, LOCS, SIDES, setSide, cleanVf, TYPES, TYPE_KO, SETUP, SYM_ITEMS, EMERGENCY, CARE_ITEMS, HORMONE, LEVEL3, DIRS, DIR_KO,
+    V, MAX_CHECKS, MAX_MRI, TAP_MS, TAP_MAX, TAP_TRIALS, TAP_REST_MS, RHY, TOL, NORMS, LOCS, SIDES, HANDS, HAND_KO, setSide, setHand, cleanVf,
+    TYPES, ACTIVE_TYPES, TYPE_KO, SETUP, SYM_ITEMS, EMERGENCY, CARE_ITEMS, HORMONE, LEVEL3, DIRS, DIR_KO,
     isDate, dayNum, localDate, empty, clean, setLoc, setNext, addMri, removeMri, addCheck, removeCheck, setMeds,
-    tapMetrics, tapLR, vfPlan, vfScore, vfTotal, vfReliable, compare, allCompare, label, crossing, setupFor, symEmergency,
-    niceTicks, graph, questions, printQuestions, baseId, summary,
+    tapMetrics, tapRecord, tapValid, tapLR, rhythmMetrics, rhythmValid, watchHand, vfPlan, vfScore, vfTotal, vfReliable,
+    compare, allCompare, label, crossing, setupFor, symEmergency,
+    niceTicks, graph, questions, printQuestions, baseId, baseIds, summary,
   });
 })();
