@@ -15,6 +15,7 @@ const FU = (() => {
   const MAX_CHECKS = 300, MAX_MRI = 60;
   const TAP_MS = 10000;
   const TAP_MAX = 70;                 // 10초 70회 초과 = 측정 오류 (표준 손가락 두드리기 검사의 건강인 최고 약 63회)
+  const TAP_MIN = 5;                  // 10초 5회 미만 = 제대로 누르지 않음(키보드 없음·자리 비움 등) → 그 회차를 다시
   const TAP_TRIALS = 3, TAP_REST_MS = 5000;   // 손마다 10초 × 3번, 사이 5초 쉬기, 평균 저장
   /* 박자 두드리기: 편한 속도로 20초. 처음 5개 간격은 버리고, 0.15초 미만(두 번 눌림)·중앙값 2배 초과(멈춤)는 실수 */
   const RHY = Object.freeze({ ms:20000, practiceMs:10000, skip:5, minIv:150, maxFactor:2, errMax:0.2, minValid:15 });
@@ -328,7 +329,7 @@ const FU = (() => {
     if(rec && (rec.type === 'smell' || rec.type === 'hear')) return fail('후각·청력 검사는 더 이상 새로 기록하지 않습니다. 증상 기록에서 체크해 주세요.');
     const n = normCheck(rec, today);
     if(!n) return fail('기록 내용이 올바르지 않습니다. 날짜와 값을 다시 확인해 주세요.');
-    if(n.type === 'tap' && !tapValid(n)) return fail(`10초에 ${TAP_MAX}회를 넘으면 측정 오류로 봅니다. 검지 하나로 스페이스바를 눌러 다시 해 주세요.`);
+    if(n.type === 'tap' && !tapValid(n)) return fail(`10초에 ${TAP_MIN}회 미만이거나 ${TAP_MAX}회를 넘으면 측정 오류로 봅니다. 키보드의 스페이스바를 검지 하나로 눌러 다시 해 주세요.`);
     if(n.type === 'rhythm' && !rhythmValid(n)) return fail('박자 두드리기 결과에 실수가 많아 기록하지 않았습니다. 다시 해 주세요.');
     if(s.checks.length >= MAX_CHECKS) return fail(`체크 기록은 ${MAX_CHECKS}개까지 둘 수 있습니다. 오래된 기록을 지운 뒤 다시 시도해 주세요.`);
     n.id = s.nid; s.nid++;
@@ -365,14 +366,14 @@ const FU = (() => {
       const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) * (b - mean), 0) / iv.length);
       if(mean > 0) cv = Math.min(500, Math.round(sd / mean * 100));
     }
-    return { n, cv, over: n > TAP_MAX };
+    return { n, cv, over: n > TAP_MAX, under: n < TAP_MIN };
   }
   /** 손마다 여러 번(최대 3번) 잰 횟수 → 저장할 기록. 평균은 반올림한 정수 */
   function tapRecord(trialsL, trialsR){
     const avg = a => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
     return { type:'tap', L:{ n:avg(trialsL), cv:null }, R:{ n:avg(trialsR), cv:null }, trials:{ L:trialsL.slice(), R:trialsR.slice() }, input:'space' };
   }
-  const tapValid = rec => rec.L.n <= TAP_MAX && rec.R.n <= TAP_MAX;     // 예전 기록 중 70회 초과는 비교에서 뺌
+  const tapValid = rec => rec.L.n >= TAP_MIN && rec.R.n >= TAP_MIN && rec.L.n <= TAP_MAX && rec.R.n <= TAP_MAX;   // 5회 미만·70회 초과는 기준점·비교에서 뺌
   /** 좌우 차이(%) = (잘 쓰는 손 − 반대 손) ÷ 잘 쓰는 손 × 100. 잘 쓰는 손을 모르면 오른손으로 봅니다(대부분 오른손잡이).
    *  보통 잘 쓰는 손이 약 8% 빠릅니다(표준 두드리기 규준: 잘 쓰는 손 49.5회, 반대 손 45.7회). */
   const tapLR = (rec, hand) => {
@@ -713,7 +714,7 @@ const FU = (() => {
   }
 
   return Object.freeze({
-    V, MAX_CHECKS, MAX_MRI, TAP_MS, TAP_MAX, TAP_TRIALS, TAP_REST_MS, RHY, TOL, NORMS, LOCS, SIDES, HANDS, HAND_KO, setSide, setHand, cleanVf,
+    V, MAX_CHECKS, MAX_MRI, TAP_MS, TAP_MAX, TAP_MIN, TAP_TRIALS, TAP_REST_MS, RHY, TOL, NORMS, LOCS, SIDES, HANDS, HAND_KO, setSide, setHand, cleanVf,
     TYPES, ACTIVE_TYPES, TYPE_KO, SETUP, SYM_ITEMS, EMERGENCY, CARE_ITEMS, HORMONE, LEVEL3, DIRS, DIR_KO,
     isDate, dayNum, localDate, empty, clean, setLoc, setNext, addMri, removeMri, addCheck, removeCheck, setMeds,
     tapMetrics, tapRecord, tapValid, tapLR, rhythmMetrics, rhythmValid, watchHand, vfPlan, vfScore, vfTotal, vfReliable,

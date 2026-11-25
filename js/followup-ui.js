@@ -334,8 +334,17 @@ function fuGraphHtml(){
 
 /* ── 빠르게 두드리기 (스페이스바만 · 손마다 10초 × 3번 · 사이 5초 쉬기 · 평균 저장) ── */
 const FU_KEY_ONLY = '키보드의 <b>스페이스바</b>를 <b>검지 하나</b>로 누릅니다. 화면을 누르거나 마우스를 쓰는 값은 세지 않습니다(입력 방법이 섞이면 비교할 수 없기 때문).';
+/* 키보드가 없어 보이는 기기(터치 위주 휴대폰·태블릿)면 시작 전에 알림. 키보드를 연결한 태블릿도 있어 막지는 않음 */
+function fuKeyboardWarn(){
+  let touchOnly = false;
+  try{ touchOnly = !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches); }catch(e){}
+  return touchOnly ? '<p class="err" role="alert"><b>키보드가 있는 컴퓨터에서 해 주세요.</b> 이 검사는 스페이스바 입력만 셉니다. 화면을 누르면 세지 않아 다시 하게 됩니다.</p>' : '';
+}
+function fuHandNote(){
+  return fuState().hand === 'unknown' ? '<p class="tiny">잘 쓰는 손을 고르지 않아 <b>오른손</b>을 잘 쓰는 손으로 보고 계산했습니다. 홈의 "잘 쓰는 손"에서 바꿀 수 있습니다.</p>' : '';
+}
 function fuTapIntro(){
-  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>빠르게 두드리기</h3></div><div class="card-pad">
+  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>빠르게 두드리기</h3></div><div class="card-pad">${fuKeyboardWarn()}
     <ol class="fu-steps"><li>편하게 앉아 키보드가 있는 기기를 책상에 두세요.</li><li>${FU_KEY_ONLY}</li><li>왼손 → 오른손 순서로, 손마다 <b>10초씩 3번</b> 최대한 빠르게 누릅니다. 사이에 5초 쉽니다.</li><li>3번의 평균과 좌우 차이가 기록됩니다. 10초에 ${FU.TAP_MAX}회를 넘으면 측정 오류로 보고 그 회차를 다시 합니다.</li></ol>
     <p class="tiny">같은 기기·같은 자세로 하면 기준점과 비교하기 쉽습니다. 처음 2번 기록의 평균이 기준점이 됩니다.${fuWatchNote('tap')} 검사 도중 화면을 벗어나면 이번 검사는 기록하지 않고 중단합니다.</p>
     <div class="fu-actions"><button class="btn primary" data-fu="tapStart">시작</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div></div></div>`;
@@ -417,6 +426,10 @@ function fuTapEnd(){
     t.note = `10초에 ${m.n}회가 눌려 측정 오류로 보고 이 회차를 다시 합니다. 검지 하나로만 눌러 주세요. `;
     return fuTapReady();
   }
+  if(m.under){                                              // 5회 미만: 스페이스바를 거의 누르지 않음(키보드 없음 등) → 같은 회차를 다시
+    t.note = `10초에 ${m.n}회만 눌려 이 회차를 다시 합니다. 화면이 아니라 키보드의 스페이스바를 눌러 주세요. `;
+    return fuTapReady();
+  }
   t.res[t.hand].push(m.n);
   if(t.trial < FU.TAP_TRIALS - 1){                           // 같은 손 다음 회차: 5초 쉬고 자동으로 준비
     t.trial++; t.phase = 'rest';
@@ -435,7 +448,7 @@ function fuTapDone(){
   return `<div class="card"><div class="card-hd"><h3>빠르게 두드리기 결과</h3></div><div class="card-pad">
     <div class="fu-scroll"><table class="rec"><thead><tr><th></th><th>1번</th><th>2번</th><th>3번</th><th>평균 (10초)</th></tr></thead><tbody>
       ${['L', 'R'].map(k => `<tr><td>${FU_HAND[k]}</td>${[0, 1, 2].map(i => `<td>${d.trials && d.trials[k][i] !== undefined ? d.trials[k][i] + '회' : '-'}</td>`).join('')}<td><b>${d[k].n}회</b></td></tr>`).join('')}</tbody></table></div>
-    <p>좌우 차이(잘 쓰는 손 기준): <b>${lr === null ? '-' : lr + '%'}</b></p>
+    <p>좌우 차이(잘 쓰는 손 기준): <b>${lr === null ? '-' : lr + '%'}</b></p>${fuHandNote()}
     <p class="tiny">숫자만으로 의미를 판단하지 않습니다. 처음 2번 기록의 평균이 기준점이 되고, 이후 기록은 기준점보다 줄었는지만 비교합니다. 방해가 있었다면 다시 하세요.</p>
     <div class="fu-actions"><button class="btn primary" data-fu="saveTap">이 결과 기록하기</button><button class="btn" data-fu="tapStart">다시 하기</button><button class="btn ghost" data-fu="discard">기록하지 않고 닫기</button></div></div></div>`;
 }
@@ -443,7 +456,7 @@ function fuTapDone(){
 /* ── 박자 두드리기 (스페이스바만 · 연습 10초(저장 안 함) → 왼손 20초 → 오른손 20초) ──
    흔들림(cv)이 측정값이므로 "규칙적으로 누르라"는 경고를 하지 않습니다. 실수(두 번 눌림·멈춤·너무 적음)만 다시 하게 합니다. */
 function fuRhythmIntro(){
-  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>박자 두드리기</h3></div><div class="card-pad">
+  return `${FU_EMERGENCY_HTML}<div class="card"><div class="card-hd"><h3>박자 두드리기</h3></div><div class="card-pad">${fuKeyboardWarn()}
     <ol class="fu-steps"><li>${FU_KEY_ONLY}</li><li><b>편한 속도로, 같은 박자를 유지하며</b> 누르세요. 빨리 누르는 검사가 아닙니다.</li><li>먼저 10초 연습(기록하지 않음), 그다음 왼손 20초 → 오른손 20초입니다.</li><li>누르는 간격이 얼마나 일정한지(흔들림 %)가 기록됩니다. 두 번 눌림·멈춤이 많으면 다시 하게 됩니다.</li></ol>
     <p class="tiny">처음 2번 기록의 평균이 기준점이 됩니다.${fuWatchNote('rhythm')} 변화 기준은 건강한 사람의 반복 측정으로 정하는 중이라, 그 전까지는 숫자만 기록하고 "기준 만드는 중"으로 보여 줍니다.</p>
     <div class="fu-actions"><button class="btn primary" data-fu="rhythmStart">시작</button><button class="btn ghost" data-fu="go" data-v="home">돌아가기</button></div></div></div>`;
