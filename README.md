@@ -17,6 +17,8 @@ npm start
 
 브라우저에서 http://localhost:3000 을 엽니다. Windows에서는 `start.bat` 또는 `mri-reader.code-workspace`를 열고 F5로 실행할 수도 있습니다. 서버는 `127.0.0.1`에만 연결됩니다. 이메일 없이 이 기기 전용 아이디·비밀번호로 가입하고 로그인합니다. 기록은 브라우저에 암호화 보관되며 기기 간 자동 동기화는 하지 않습니다.
 
+`index.html`을 더블클릭(file://)하거나 VS Code Live Server로 열지 마세요. 화면은 뜨지만 `/api`가 없어 학습 모델 분석이 꺼지고 데모 분석만 동작합니다. 반드시 `npm start`, `start.bat`, F5 중 하나로 실행하세요.
+
 시작 화면은 `index.html`입니다. `mri-reader.html`은 이전 단일 파일 데모로 보존한 파일입니다. 현재 기능 수정은 `index.html`, `js/`, `css/`를 기준으로 진행하세요.
 
 ## 구성
@@ -68,7 +70,7 @@ python ml/infer_server.py
 
 Windows에서는 `start-ml.bat`을 사용할 수 있습니다. 웹 서버와 분석 서버를 각각 실행하세요.
 
-모델 가중치(`*.joblib`, `*.pth`)는 Git에서 제외되므로 clone만으로는 Python 분석이 켜지지 않습니다. 기존 로컬 모델을 사용하거나 다음 구조의 데이터로 후보를 학습하세요. `Training/Testing`과 `glioma/meningioma/pituitary/notumor` 폴더 이름도 지원합니다.
+현재 실행 모델(`ml/backbone.pth`, `ml/classifier.joblib`)은 저장소에 포함되어 있어 clone 후 위 명령만으로 분석 서버가 켜집니다. 그 밖의 학습 산출물(`*.joblib`, `*.pth` 등)은 Git에서 제외됩니다. 새 후보를 학습하려면 다음 구조의 데이터를 준비하세요. `Training/Testing`과 `glioma/meningioma/pituitary/notumor` 폴더 이름도 지원합니다.
 
 ```text
 dataset/

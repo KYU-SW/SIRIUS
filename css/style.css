@@ -153,12 +153,13 @@ a{color:var(--brand); text-decoration:none}
 
 .field{display:flex; flex-direction:column; gap:6px; margin-bottom:14px}
 .field label{font-size:calc(13px * var(--fs)); font-weight:600; color:var(--ink)}
-.field input{
+.field input, .field select{
   width:100%; border:1px solid var(--line-2); background:var(--surface-2); border-radius:10px;
   padding:11px 13px; font-size:calc(14px * var(--fs));
 }
+.field select{cursor:pointer}
 .field input::placeholder{color:var(--ink-3)}
-.field input:focus{outline:none; border-color:var(--brand); background:var(--surface); box-shadow:0 0 0 3px var(--brand-soft)}
+.field input:focus, .field select:focus{outline:none; border-color:var(--brand); background:var(--surface); box-shadow:0 0 0 3px var(--brand-soft)}
 .field input:disabled{opacity:.6}
 .field .help{font-size:calc(12px * var(--fs)); color:var(--ink-3)}
 .field .help.ok{color:var(--brand)} .field .help.no{color:var(--bad)}
@@ -286,7 +287,11 @@ a{color:var(--brand); text-decoration:none}
 @media (max-width:900px){
   .shell{grid-template-columns:1fr}
   .side{position:static; height:auto; flex-direction:row; overflow-x:auto; padding:10px;
-        border-right:0; border-bottom:1px solid var(--line); gap:6px; align-items:center}
+        border-right:0; border-bottom:1px solid var(--line); gap:6px; align-items:center;
+        /* 오른쪽 끝을 흐리게 해서 옆으로 밀면 메뉴가 더 있다는 것을 알려 줌 */
+        -webkit-mask-image:linear-gradient(to right, #000 calc(100% - 36px), transparent);
+                mask-image:linear-gradient(to right, #000 calc(100% - 36px), transparent);
+        padding-right:36px}
   .side .logo{padding:0 8px 0 4px}
   .side .spacer,.sidefoot{display:none}
   .navitem{width:auto; white-space:nowrap; padding:8px 11px}
@@ -547,6 +552,7 @@ footer.sitefoot b{color:var(--ink-2)}
 .fu-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:4px 18px}
 .fu-grid3{grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); align-items:end}
 .fu-btnrow{display:flex; align-items:flex-end}
+.fu-grid3 .fu-btnrow{padding-bottom:calc(12px * var(--fs) * 1.5 + 6px)}   /* 옆 칸 도움말 줄만큼 올려 입력칸과 맞춤 */
 .fu-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%}
 .fu-scroll table.rec{min-width:560px; width:100%}
 .fu-scroll table.rec.fu-narrow{min-width:260px}
@@ -564,6 +570,7 @@ footer.sitefoot b{color:var(--ink-2)}
 .fu-chg{border-color:var(--spread); background:color-mix(in srgb, var(--spread) 14%, var(--surface-2)); font-weight:600}
 .fu-same{border-color:var(--good)}
 .fu-rec{font-size:.75em; padding:1px 7px; border-radius:999px; background:var(--brand-soft); color:var(--brand); vertical-align:1px}
+.fu-rec.fu-pc{background:var(--surface-2); color:var(--ink-3); border:1px solid var(--line-2)}
 .fu-bad{color:var(--bad)}
 .fu-steps{padding-left:20px; line-height:1.8}
 .fu-fs{border:1px solid var(--line); border-radius:12px; padding:10px 14px 12px; margin:12px 0}

@@ -35,11 +35,23 @@ def make_finetuned_model():
     return model
 
 
+def _base_version(version):
+    """'2.15.0+cpu', '2.15.0+cu132', '2.15.0'(macOS) 처럼 빌드 표시만 다른 같은 버전을 같게 봅니다."""
+    return str(version or '').split('+')[0]
+
+
+def check_torch_version(meta):
+    expected = meta.get('torch_version')
+    if _base_version(expected) != _base_version(torch.__version__):
+        raise ValueError(
+            f'PyTorch 버전이 모델과 다릅니다 (모델 {expected or "정보 없음"} / 설치 {torch.__version__}). '
+            'README의 torch 설치 명령으로 같은 버전을 설치하세요.')
+
+
 class MobileClassifier:
     def __init__(self, directory, meta):
         directory = Path(directory)
-        if meta.get('torch_version') != torch.__version__:
-            raise ValueError('PyTorch version does not match model metadata')
+        check_torch_version(meta)
         torch.set_num_threads(4)
         constructor, weights, dimensions = FEATURE_BACKBONES[meta['architecture']]
         self.backbone = constructor(weights=None).eval()
@@ -89,8 +101,7 @@ class MobileClassifier:
 
 class TorchMRIClassifier(MobileClassifier):
     def __init__(self, directory, meta):
-        if meta.get('torch_version') != torch.__version__:
-            raise ValueError('PyTorch version does not match model metadata')
+        check_torch_version(meta)
         torch.set_num_threads(4)
         self.backbone = make_finetuned_model().eval()
         self.backbone.load_state_dict(torch.load(Path(directory) / 'model.pth', weights_only=True, map_location='cpu'))

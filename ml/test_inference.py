@@ -88,5 +88,18 @@ class CNNInputChecks(unittest.TestCase):
             classifier.predict_image(Image.new('RGB', (900, 1)))
 
 
+class TorchVersionChecks(unittest.TestCase):
+    def test_build_suffix_is_ignored_but_version_must_match(self):
+        import torch
+        import cnn_backend
+        base = torch.__version__.split('+')[0]
+        for recorded in (base, base + '+cpu', base + '+cu132'):
+            cnn_backend.check_torch_version({'torch_version': recorded})   # macOS·CPU·CUDA 빌드 모두 허용
+        with self.assertRaises(ValueError):
+            cnn_backend.check_torch_version({'torch_version': '1.0.0+cpu'})
+        with self.assertRaises(ValueError):
+            cnn_backend.check_torch_version({})
+
+
 if __name__ == '__main__':
     unittest.main()

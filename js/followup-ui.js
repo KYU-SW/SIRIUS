@@ -206,7 +206,7 @@ function fuHome(){
     <h4 class="fu-h4">MRI 크기 기록 추가</h4>
     <div class="fu-grid fu-grid3">
       <div class="field"><label for="fuSize">크기 (mm)</label><input id="fuSize" type="text" inputmode="decimal" autocomplete="off" maxlength="6" placeholder="예: 18.5"><span class="help">판독지에 적힌 가장 긴 지름</span></div>
-      <div class="field"><label for="fuMriDate">촬영일</label>${fuDateIn('fuMriDate', '', true)}</div>
+      <div class="field"><label for="fuMriDate">촬영일</label>${fuDateIn('fuMriDate', '', true)}<span class="help">판독지에 적힌 검사일</span></div>
       <div class="field fu-btnrow"><button class="btn primary" data-fu="addMri">MRI 기록 추가</button></div>
     </div>
     ${s.mri.length ? `<div class="fu-scroll"><table class="rec fu-narrow"><thead><tr><th>촬영일</th><th>크기</th><th></th></tr></thead><tbody>${mriRows}</tbody></table></div>` : '<p class="tiny">아직 입력한 MRI 기록이 없습니다.</p>'}
@@ -253,8 +253,13 @@ function fuCheckRow(type, core, quick){
     care:'보호자가 곁에서 본 성격·행동·경련·균형의 변화를 기록합니다.',
   }[type];
   const view = { tap:'tapIntro', rhythm:'rhythmIntro', vf4:'vfIntro', sym:'sym', care:'care' }[type];
-  const watch = (type === 'tap' || type === 'rhythm') ? fuWatchNote(type) : '';
-  return `<li><div><b>${esc(FU.TYPE_KO[type])}</b>${core ? (type === 'vf4' && quick ? ' <span class="fu-rec">빠른 확인</span>' : ' <span class="fu-rec">권장</span>') : ''}<div class="tiny">${esc(desc)}${watch}</div><div class="fu-chips">${chips}</div></div><button class="btn sm${core ? ' primary' : ''}" data-fu="go" data-v="${view}">시작</button></li>`;
+  const keyOnly = type === 'tap' || type === 'rhythm';
+  const watch = keyOnly ? fuWatchNote(type) : '';
+  // 스페이스바 전용 체크는 터치 기기에서 할 수 없으므로 '권장' 대신 'PC 필요'로 보여 줍니다
+  const needPc = keyOnly && fuTouchOnly();
+  const tag = needPc ? ' <span class="fu-rec fu-pc">PC 필요</span>'
+    : core ? (type === 'vf4' && quick ? ' <span class="fu-rec">빠른 확인</span>' : ' <span class="fu-rec">권장</span>') : '';
+  return `<li><div><b>${esc(FU.TYPE_KO[type])}</b>${tag}<div class="tiny">${esc(desc)}${watch}</div><div class="fu-chips">${chips}</div></div><button class="btn sm${core && !needPc ? ' primary' : ''}" data-fu="go" data-v="${view}">시작</button></li>`;
 }
 function fuRecLine(c){
   const hand = fuState().hand;
@@ -335,10 +340,11 @@ function fuGraphHtml(){
 /* ── 빠르게 두드리기 (스페이스바만 · 손마다 10초 × 3번 · 사이 5초 쉬기 · 평균 저장) ── */
 const FU_KEY_ONLY = '키보드의 <b>스페이스바</b>를 <b>검지 하나</b>로 누릅니다. 화면을 누르거나 마우스를 쓰는 값은 세지 않습니다(입력 방법이 섞이면 비교할 수 없기 때문).';
 /* 키보드가 없어 보이는 기기(터치 위주 휴대폰·태블릿)면 시작 전에 알림. 키보드를 연결한 태블릿도 있어 막지는 않음 */
+function fuTouchOnly(){
+  try{ return !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches); }catch(e){ return false; }
+}
 function fuKeyboardWarn(){
-  let touchOnly = false;
-  try{ touchOnly = !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches); }catch(e){}
-  return touchOnly ? '<p class="err" role="alert"><b>키보드가 있는 컴퓨터에서 해 주세요.</b> 이 검사는 스페이스바 입력만 셉니다. 화면을 누르면 세지 않아 다시 하게 됩니다.</p>' : '';
+  return fuTouchOnly() ? '<p class="err" role="alert"><b>키보드가 있는 컴퓨터에서 해 주세요.</b> 이 검사는 스페이스바 입력만 셉니다. 화면을 누르면 세지 않아 다시 하게 됩니다.</p>' : '';
 }
 function fuHandNote(){
   return fuState().hand === 'unknown' ? '<p class="tiny">잘 쓰는 손을 고르지 않아 <b>오른손</b>을 잘 쓰는 손으로 보고 계산했습니다. 홈의 "잘 쓰는 손"에서 바꿀 수 있습니다.</p>' : '';

@@ -6,27 +6,30 @@
 function renderAll(){
   const a = S.analysis; if(!a) return;
   const R = S.regions;
-  const attentionLabel = a.kind === 'model' ? '모델 주목도' : '비대칭 점수';
+  const isModel = a.kind === 'model';
+  const attentionLabel = isModel ? '모델 주목도' : '비대칭 점수';
+  // 데모 휴리스틱은 학습 모델이 아니므로 퍼센트·유형 추정을 보여 주지 않습니다(확률처럼 읽히는 것을 막음)
+  const scoreText = r => isModel ? ` · ${attentionLabel} ${(r.conf*100).toFixed(0)}%` : '';
   $('vTitle').textContent = R.length
     ? `눈여겨볼 곳 ${R.length}군데 — 가장 뚜렷한 곳은 ${R[0].name}`
     : a.kind === 'model' ? '모델 주목 영역이 뚜렷하지 않습니다' : '한쪽에만 두드러지는 부분은 찾지 못했습니다';
-  $('vConf').textContent = R.length ? `${attentionLabel} ${(R[0].conf*100).toFixed(0)}% · ${ENGINE.name}` : ENGINE.name;
+  $('vConf').textContent = R.length && isModel ? `${attentionLabel} ${(R[0].conf*100).toFixed(0)}% · ${ENGINE.name}` : `${ENGINE.name}${isModel ? '' : ' · 진단 아님'}`;
   $('report').innerHTML = buildReport(a, R, S.compared, S.simple).map(p=>`<p>${linkTerms(p)}</p>`).join('');
   $('findings').innerHTML = R.length ? R.map((r,i)=>`
     <div class="finding">
       <div class="top">
         <span class="num" style="background:var(${COLORVAR[r.status]})">${i+1}</span>
-        <div><div class="nm">${esc(r.name)}</div><div class="ds">${esc(r.change)} · ${attentionLabel} ${(r.conf*100).toFixed(0)}%</div></div>
+        <div><div class="nm">${esc(r.name)}</div><div class="ds">${esc(r.change)}${scoreText(r)}</div></div>
         <span class="tag t-${r.status}">${STATUS_KO[r.status]}</span>
       </div>
     </div>`).join('') : `<p class="tiny">${a.kind === 'model' ? '모델 주목 영역이 뚜렷하지 않습니다.' : '한쪽에만 두드러지는 부위를 찾지 못했습니다.'}</p>`;
 
   // 분석 신뢰도 막대
   const top = R.length ? R[0].conf : 0;
-  $('confWrap').hidden = !R.length;
+  $('confWrap').hidden = !R.length || !isModel;
   $('confPct').textContent = R.length ? `${(top*100).toFixed(0)}%` : '—';
   $('confBar').style.width = `${(top*100).toFixed(0)}%`;
-  $('probsWrap').hidden = false;
+  $('probsWrap').hidden = !isModel;
   $('probsTitle').textContent = ENGINE.probsTitle;
   $('confNote').textContent = ENGINE.confNote;
   const order = CLASSES.map((c,i)=>({...c, p:a.probs[i]})).sort((x,y)=>y.p-x.p);
