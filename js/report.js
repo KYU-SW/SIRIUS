@@ -74,7 +74,7 @@ function buildReport(a, regions, compared, simple){
     lines.push('이 결과는 <b>진단이 아닙니다.</b> 질문 목록을 챙겨 담당 의사에게 그대로 물어보세요.');
     return lines;
   }
-  lines.push(`이번 ${nth}차 영상의 데모 분석에서 좌우 밝기 차이가 큰 지점 ${n}곳을 표시했습니다. 가장 두드러진 곳은 <b>${esc(t.name)}</b>입니다. (비대칭 점수 ${(t.conf*100).toFixed(0)}% — 진단 신뢰도가 아님)`);
+  lines.push(`이번 ${nth}차 영상의 데모 분석에서 좌우 밝기 차이가 큰 지점 ${n}곳을 표시했습니다. 가장 두드러진 곳은 <b>${esc(t.name)}</b>입니다. 학습 모델이 아닌 데모 표시이며, 표시된 곳이 병변이라는 뜻이 아닙니다(정상 구조도 표시될 수 있음).`);
   if(rest.length) lines.push(`그 밖에 ${rest.map(r=>`<b>${esc(r.name)}</b>`).join(', ')}에서도 같은 방향의 신호 차이가 관찰됩니다. 크기가 작을수록 촬영 각도나 잡음일 가능성도 함께 고려해야 합니다.`);
   lines.push('부위 이름은 축상면 기준이며, 영상의 왼쪽이 환자의 오른쪽입니다(방사선과 표기 관례). 병변 주변이 넓게 밝다면 부종이 함께 있을 수 있습니다.');
   if(compared) lines.push(`직전 회차와 맞대어 본 결과: ${regions.map(r=>`<b>${esc(r.name)}</b> — ${esc(STATUS_KO[r.status])}(${esc(r.change)})`).join(' · ')}.`);

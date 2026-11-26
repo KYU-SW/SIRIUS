@@ -14,9 +14,6 @@
     "editor.rulers": [
       100
     ],
-    "liveServer.settings.port": 5500,
-    "liveServer.settings.root": "/",
-    "livePreview.defaultPreviewPath": "/index.html",
     "search.exclude": {
       "**/node_modules": true,
       "**/.vercel": true
@@ -27,9 +24,13 @@
   },
   "extensions": {
     "recommendations": [
-      "ms-vscode.live-server",
-      "ritwickdey.liveserver",
       "esbenp.prettier-vscode"
+    ],
+    // Live Server로 열면 /api 가 없어 학습 모델 분석이 꺼지고 폴더 전체(.env.local 포함)가 열립니다.
+    // 반드시 start.bat 또는 F5(server.js)로 실행하세요.
+    "unwantedRecommendations": [
+      "ms-vscode.live-server",
+      "ritwickdey.liveserver"
     ]
   },
   "launch": {

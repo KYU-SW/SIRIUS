@@ -934,3 +934,16 @@ test('⑨ 브랜드는 SIRIUS 로 통일하고, 예전 NEURIA 설정(테마·색
   const store = read('js/store.js');
   assert.match(store, /AKEY = 'mri-accounts-v3'/); assert.match(store, /EMAIL_PEPPER = 'mri-reader\/email\/v3'/); assert.match(store, /'MRI-' \+/);
 });
+
+test('데모 휴리스틱 결과는 퍼센트 점수와 유형 추정을 보여 주지 않고, 학습 모델 결과는 보여 준다', async () => {
+  const b = buildBrowser();
+  await analyzeOnce(b);
+  b.g("S.regions=[{name:'좌측 기저핵 부근',nx:.6,ny:.4,r:.1,conf:.97,status:'neutral',change:'첫 기록'}]; S.analysis={kind:'demo',probs:[.4,.3,.2,.1],quality:'양호'}; renderAll();");
+  assert.equal(b.el('confWrap').hidden, true);
+  assert.equal(b.el('probsWrap').hidden, true);
+  assert.doesNotMatch(b.el('vConf').textContent + b.el('findings').innerHTML + b.el('report').innerHTML, /97%/);
+  b.g("S.regions=[{name:'주목 영역 A',nx:.6,ny:.4,r:.1,conf:.8,status:'neutral',change:'모델',kind:'model'}]; S.analysis={kind:'model',probs:[.7,.1,.1,.1],quality:'양호'}; renderAll();");
+  assert.equal(b.el('confWrap').hidden, false);
+  assert.equal(b.el('probsWrap').hidden, false);
+  assert.match(b.el('vConf').textContent, /80%/);
+});

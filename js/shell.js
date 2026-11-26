@@ -117,13 +117,6 @@ function go(page){
 }
 document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
 
-/* ── 아직 준비되지 않은 버튼 ─────────────────────────────── */
-document.querySelectorAll('[data-soon]').forEach(b => b.onclick = () => {
-  const el = $('err-login');
-  el.textContent = `${b.dataset.soon} 계정 로그인은 아직 준비 중입니다. 아이디와 비밀번호로 로그인해 주세요.`;
-  el.hidden = false;
-});
-
 /* ── 아이디 기억하기 ─────────────────────────────────────── */
 const ID_KEY = 'sirius-last-id';
 (function initRememberId(){
